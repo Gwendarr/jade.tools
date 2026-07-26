@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="ru" data-theme="{{ theme }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}jade.tools{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000;
+    --surface:#101010; --surface-2:#181818; --surface-hover:#222;
+    --surface-focus:#1f1f1f; --rail-bg:#080808; --placeholder:#555;
+    --line:#262626; --line-strong:#3a3a3a;
+    --text:#e3e3e3; --muted:#8a8a8a;
+    --accent:#21c98a; --accent-text:#06150f; --accent-dim:#2f7d62;
+    /* Семантические цвета состояний (ошибка/успех) — *-rgb хранит "R,G,B" для
+       rgba() в полупрозрачных фонах/рамках, обычная переменная — для текста. */
+    --error-rgb:255,90,90; --error:#ff9a9a; --error-strong:#ff7a7a; --error-bright:#ffb3b3;
+    --success-rgb:120,220,150; --success:#9fe9b8;
+    --radius:18px; --radius-sm:12px;
+    /* Ширина сайдбара — чтобы плавающие элементы (тосты и т.п.) центрировались
+       относительно области контента, а не всего окна. 0 на мобильной раскладке
+       (там сайдбар — верхняя полоса на всю ширину, см. медиа-запрос ниже). */
+    --rail-w:88px;
+  }
+  /* Светлая тема — переключается атрибутом data-theme на <html> (см. конец
+     <body>: серверный рендер из настроек + мгновенное применение в JS при
+     смене селекта в /settings/, без перезагрузки страницы). Акцент затемнён
+     относительно тёмной темы — исходный #21c98a слишком светлый для
+     достаточного контраста на белом фоне. */
+  [data-theme="light"]{
+    --bg:#f6f6f4;
+    --surface:#ffffff; --surface-2:#f0f0ee; --surface-hover:#e4e4e0;
+    --surface-focus:#eaeae6; --rail-bg:#ffffff; --placeholder:#b3b1ac;
+    --line:#e2e2dd; --line-strong:#c9c9c3;
+    --text:#171715; --muted:#6b6b67;
+    --accent:#178f66; --accent-text:#f5fff9; --accent-dim:#5fae87;
+    --error-rgb:194,47,47; --error:#c22f2f; --error-strong:#a61b1b; --error-bright:#8e1717;
+    --success-rgb:30,140,90; --success:#1e8c5a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:"IBM Plex Mono",ui-monospace,"Cascadia Code","Segoe UI Mono",Consolas,monospace;
+    min-height:100vh;line-height:1.5;font-size:14px;-webkit-font-smoothing:antialiased;
+    display:flex;
+  }
+
+  /* Сайдбар */
+  .rail{
+    position:sticky;top:0;align-self:flex-start;
+    width:88px;min-height:100vh;flex:none;
+    background:var(--rail-bg);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;gap:4px;padding:16px 8px;
+  }
+  .rail-logo{
+    width:42px;height:42px;border-radius:12px;margin-bottom:10px;
+    background:var(--surface-2);border:1px solid var(--line);
+    display:grid;place-items:center;
+  }
+  .rail-logo svg{width:22px;height:22px;fill:var(--accent)}
+  .rail-item{
+    width:100%;display:flex;flex-direction:column;align-items:center;gap:5px;
+    padding:10px 4px;border-radius:12px;color:var(--muted);text-decoration:none;
+    font-size:10px;text-transform:lowercase;text-align:center;letter-spacing:.2px;
+    transition:background .15s,color .15s;
+  }
+  .rail-item svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;
+                 stroke-linecap:round;stroke-linejoin:round}
+  .rail-item:hover{background:var(--surface);color:var(--text)}
+  .rail-item.active{background:var(--surface-2);color:var(--text)}
+  /* Настройки — отдельным элементом у нижнего края панели. */
+  .rail-bottom{margin-top:auto;position:relative}
+  .rail-bottom::before{content:"";position:absolute;top:-9px;left:18%;right:18%;
+                       height:1px;background:var(--line)}
+
+  .content{flex:1;min-width:0}
+  .wrap{max-width:560px;margin:0 auto;padding:48px 20px 64px}
+
+  .page-head{margin-bottom:24px}
+  .page-head h1{font-size:18px;margin:0 0 4px;font-weight:600;text-transform:lowercase;letter-spacing:.3px}
+  .page-head p{margin:0;color:var(--muted);font-size:12px}
+
+  /* Карточки и контролы */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+        padding:18px;margin-bottom:12px}
+  label{display:block;font-size:11px;color:var(--muted);margin-bottom:10px;font-weight:500;
+        text-transform:lowercase;letter-spacing:.4px}
+
+  .url-row{display:flex;gap:8px;flex-wrap:wrap}
+  input[type=text],input[type=number],select{
+    flex:1;min-width:200px;background:var(--surface-2);border:1px solid var(--line);
+    color:var(--text);padding:14px 16px;border-radius:var(--radius-sm);font-size:14px;
+    font-family:inherit;outline:none;transition:border .15s,background .15s;width:100%;
+  }
+  input::placeholder{color:var(--placeholder)}
+  input:focus,select:focus{border-color:var(--accent-dim);background:var(--surface-focus)}
+  select{cursor:pointer}
+
+  button{
+    cursor:pointer;border:1px solid transparent;border-radius:var(--radius-sm);
+    padding:14px 18px;font-size:14px;font-weight:500;font-family:inherit;
+    text-transform:lowercase;letter-spacing:.2px;
+    background:var(--accent);color:var(--accent-text);
+    transition:opacity .15s,background .15s,transform .04s;
+  }
+  button:hover{opacity:.82}
+  button:active{transform:translateY(1px)}
+  button.ghost{background:var(--surface-2);color:var(--text);border-color:var(--line)}
+  button.ghost:hover{background:var(--surface-hover);opacity:1}
+  button:disabled{opacity:.4;cursor:not-allowed}
+
+  .seg{display:flex;gap:8px;flex-wrap:wrap}
+  .seg button{flex:1;min-width:120px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted)}
+  .seg button.active{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+  .seg button:hover:not(.active){background:var(--surface-hover);color:var(--text);opacity:1}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid.grid3{grid-template-columns:repeat(3,1fr)}
+  .grid input,.grid select{min-width:0}
+  @media (max-width:620px){.grid,.grid.grid3{grid-template-columns:1fr}}
+
+  .hidden{display:none!important}
+
+  /* Превью / источник */
+  .preview{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+  .preview img{width:200px;max-width:100%;border-radius:12px;border:1px solid var(--line)}
+  .preview .meta h3{margin:0 0 4px;font-size:14px;font-weight:600}
+  .preview .meta .sub{color:var(--muted);font-size:12px}
+
+  /* Зона перетаскивания */
+  .drop{border:1.5px dashed var(--line-strong);border-radius:var(--radius);
+        padding:34px 20px;text-align:center;color:var(--muted);cursor:pointer;
+        background:var(--surface-2);transition:border-color .15s,background .15s,color .15s}
+  .drop:hover,.drop.over{border-color:var(--text);color:var(--text);background:var(--surface-focus)}
+  .drop .big{font-size:13px;color:var(--text);margin-bottom:6px;word-break:break-word}
+  .drop .small{font-size:11px}
+  .or{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:11px;
+      margin:16px 0;text-transform:lowercase}
+  .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .presets button{flex:0 0 auto;padding:9px 13px;font-size:12px}
+
+  /* Прогресс */
+  .bar{height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden;border:1px solid var(--line)}
+  .bar > i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+  .prog-line{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:12px;margin-top:10px}
+
+  .msg{padding:12px 14px;border-radius:var(--radius-sm);font-size:13px;margin-top:12px;
+       border:1px solid var(--line);background:var(--surface-2)}
+  .msg.err{background:rgba(var(--error-rgb),.08);border-color:rgba(var(--error-rgb),.35);color:var(--error)}
+  .msg.ok{background:rgba(var(--success-rgb),.08);border-color:rgba(var(--success-rgb),.35);color:var(--success)}
+
+  .hint{color:var(--muted);font-size:11px;margin-top:12px}
+  footer{color:var(--muted);font-size:11px;text-align:center;margin-top:26px;line-height:1.7}
+  code{background:var(--surface-2);border:1px solid var(--line);padding:2px 6px;border-radius:6px;
+       font-family:inherit;font-size:.9em}
+
+  /* Плитки лендинга */
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:620px){.tiles{grid-template-columns:1fr}}
+  .tile{display:block;text-decoration:none;color:inherit;background:var(--surface);
+        border:1px solid var(--line);border-radius:var(--radius);padding:20px;
+        transition:border-color .15s,background .15s}
+  .tile:hover{border-color:var(--line-strong);background:var(--surface-hover)}
+  .tile-icon{width:42px;height:42px;border-radius:12px;background:var(--surface-2);
+             border:1px solid var(--line);display:grid;place-items:center;margin-bottom:14px}
+  .tile-icon svg{width:22px;height:22px;fill:none;stroke:var(--text);stroke-width:1.8;
+                 stroke-linecap:round;stroke-linejoin:round}
+  .tile-name{font-size:14px;font-weight:600;margin-bottom:4px;text-transform:lowercase}
+  .tile-desc{font-size:12px;color:var(--muted)}
+
+  @media (max-width:620px){
+    :root{--rail-w:0px}   /* сайдбар уходит наверх — контент занимает всю ширину */
+    body{flex-direction:column}
+    .rail{flex-direction:row;width:100%;min-height:auto;border-right:0;
+          border-bottom:1px solid var(--line);overflow-x:auto;gap:4px;padding:10px}
+    .rail-logo{margin-bottom:0}
+    .rail-item{width:auto;flex:0 0 auto;padding:8px 12px}
+    .wrap{padding:28px 16px 56px}
+  }
+
+  /* Inline-иконки (Lucide). Цвет/толщина наследуются от текста. */
+  .ic{width:16px;height:16px;display:inline-block;vertical-align:-3px;flex:none;
+      fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* Модалка (общий паттерн — подтверждения в настройках, окно установки
+     зависимостей ниже; НЕ дублировать вёрстку под конкретный сценарий). */
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
+            align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);
+         padding:22px;max-width:420px;width:100%}
+  .modal h3{margin:0 0 10px;font-size:15px;font-weight:600;text-transform:lowercase}
+  .modal p{margin:0 0 18px;color:var(--muted);font-size:13px;line-height:1.6}
+  .modal .actions{display:flex;gap:10px;justify-content:flex-end}
+
+  /* Окно установки зависимостей (этап 2) — шире обычной модалки, свой набор
+     вью (список вариантов / прогресс / вручную / pip-winget), переключаемых
+     через .hidden на каждом. */
+  #installModal .modal{max-width:480px}
+  #installModal .miss-list{margin:0 0 16px;padding:0;list-style:none;display:flex;
+                           flex-wrap:wrap;gap:6px}
+  #installModal .miss-list li{background:var(--surface-2);border:1px solid var(--line);
+                              border-radius:99px;padding:4px 11px;font-size:12px;color:var(--text)}
+  #installModal .opt{display:block;width:100%;text-align:left;background:var(--surface-2);
+                     border:1px solid var(--line);border-radius:var(--radius-sm);
+                     padding:14px 16px;margin-bottom:10px;color:var(--text)}
+  #installModal .opt:hover{background:var(--surface-hover);opacity:1}
+  #installModal .opt b{display:block;font-size:13px;font-weight:600;margin-bottom:3px;
+                       text-transform:lowercase}
+  #installModal .opt span{display:block;font-size:11.5px;color:var(--muted);line-height:1.5}
+  #installModal .back{background:none;border:none;color:var(--muted);padding:0;
+                      font-size:12px;margin-bottom:14px;text-transform:lowercase}
+  #installModal .back:hover{color:var(--text);opacity:1}
+  #installModal .grp{border-top:1px solid var(--line);padding:14px 0}
+  #installModal .grp:first-of-type{border-top:0;padding-top:0}
+  #installModal .grp .glabel{font-size:13px;font-weight:600;margin-bottom:6px}
+  #installModal .grp a{color:var(--accent);word-break:break-all}
+  #installModal .cmdrow{display:flex;gap:8px;align-items:center;margin-top:8px}
+  #installModal .cmdrow code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;padding:8px 10px}
+  #installModal .cmdrow button{flex:none;padding:8px 12px;font-size:12px}
+  #installModal .warn{background:rgba(var(--error-rgb),.08);border:1px solid rgba(var(--error-rgb),.3);
+                      color:var(--error);border-radius:var(--radius-sm);padding:10px 12px;
+                      font-size:12px;line-height:1.6;margin-bottom:16px}
+
+  /* Ссылка на GitHub-репозиторий — фиксированная кнопка в правом нижнем углу
+     вьюпорта, поверх интерфейса, видна на всех страницах (шаблон общий).
+     Иконка Invertocat — жёсткий цвет по бренд-гайдлайнам GitHub, поэтому
+     переключаем сам файл иконки по теме (data-theme), а не красим currentColor. */
+  .gh-fab{position:fixed;right:20px;bottom:20px;z-index:40;width:44px;height:44px;
+          border-radius:50%;background:var(--surface);border:1px solid var(--line);
+          display:flex;align-items:center;justify-content:center;
+          transition:background .15s,border-color .15s}
+  .gh-fab:hover{background:var(--surface-hover);opacity:1}
+  .gh-fab svg{width:22px;height:22px;display:block}
+  .gh-fab .gh-icon-light{display:none}
+  [data-theme="light"] .gh-fab .gh-icon-dark{display:none}
+  [data-theme="light"] .gh-fab .gh-icon-light{display:block}
+</style>
+<script>
+// Набор Lucide-иконок (lucide.dev, ISC). Используются как window.ICONS.name
+// в JS и через data-icon="name" в разметке.
+window.ICONS = (function(){
+  const wrap = (b)=> '<svg class="ic" viewBox="0 0 24 24">'+b+'</svg>';
+  const P = {
+    download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+    save:'<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+    music:'<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+    clapperboard:'<path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+    film:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/>',
+    shrink:'<path d="m15 15 6 6m-6-6v4.8m0-4.8h4.8"/><path d="M9 19.8V15m0 0H4.2M9 15l-6 6"/><path d="M15 4.2V9m0 0h4.8M15 9l6-6"/><path d="M9 4.2V9m0 0H4.2M9 9 3 3"/>',
+    timer:'<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
+    monitor:'<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+    package:'<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/>',
+    volume:'<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+    scissors:'<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>',
+    user:'<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    chevronUp:'<path d="m18 15-6-6-6 6"/>',
+    chevronDown:'<path d="m6 9 6 6 6-6"/>',
+    chevronsUp:'<path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/>',
+    chevronsDown:'<path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/>',
+    chevronLeft:'<path d="m15 18-6-6 6-6"/>',
+    chevronRight:'<path d="m9 18 6-6-6-6"/>',
+    chevronsLeft:'<path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/>',
+    chevronsRight:'<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+    x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  };
+  const out = {};
+  for(const k in P) out[k] = wrap(P[k]);
+  return out;
+})();
+document.addEventListener("DOMContentLoaded", ()=>{
+  document.querySelectorAll("[data-icon]").forEach(el=>{
+    const ic = window.ICONS[el.dataset.icon];
+    if(ic) el.innerHTML = ic;
+  });
+});
+</script>
+{% block head %}{% endblock %}
+</head>
+<body>
+  <nav class="rail">
+    <a class="rail-logo" href="{{ url_for('index') }}" title="главная">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    </a>
+    <a class="rail-item {% if request.path == '/' %}active{% endif %}" href="{{ url_for('index') }}">
+      <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/></svg>
+      <span>главная</span>
+    </a>
+    {% for t in tools %}
+    <a class="rail-item {% if request.path.startswith(t.url.rstrip('/')) and t.url != '/' %}active{% endif %}" href="{{ t.url }}">
+      {{ t.icon|safe }}<span>{{ t.name }}</span>
+    </a>
+    {% endfor %}
+    <a class="rail-item rail-bottom {% if request.path.startswith('/settings') %}active{% endif %}" href="/settings/" title="настройки">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>настройки</span>
+    </a>
+  </nav>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <a class="gh-fab" href="https://github.com/Gwendarr/jade.tools" target="_blank"
+     rel="noopener noreferrer" title="перейти в репозиторий на GitHub">
+    <svg class="gh-icon-dark" viewBox="0 0 98 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g clip-path="url(#gh_fab_clip_dark)">
+        <path d="M41.4395 69.3848C28.8066 67.8535 19.9062 58.7617 19.9062 46.9902C19.9062 42.2051 21.6289 37.0371 24.5 33.5918C23.2559 30.4336 23.4473 23.7344 24.8828 20.959C28.7109 20.4805 33.8789 22.4902 36.9414 25.2656C40.5781 24.1172 44.4062 23.543 49.0957 23.543C53.7852 23.543 57.6133 24.1172 61.0586 25.1699C64.0254 22.4902 69.2891 20.4805 73.1172 20.959C74.457 23.543 74.6484 30.2422 73.4043 33.4961C76.4668 37.1328 78.0937 42.0137 78.0937 46.9902C78.0937 58.7617 69.1934 67.6621 56.3691 69.2891C59.623 71.3945 61.8242 75.9883 61.8242 81.252L61.8242 91.2051C61.8242 94.0762 64.2168 95.7031 67.0879 94.5547C84.4102 87.9512 98 70.6289 98 49.1914C98 22.1074 75.9883 6.69539e-07 48.9043 4.309e-07C21.8203 1.92261e-07 -1.9479e-07 22.1074 -4.3343e-07 49.1914C-6.20631e-07 70.4375 13.4941 88.0469 31.6777 94.6504C34.2617 95.6074 36.75 93.8848 36.75 91.3008L36.75 83.6445C35.4102 84.2188 33.6875 84.6016 32.1562 84.6016C25.8398 84.6016 22.1074 81.1563 19.4277 74.7441C18.375 72.1602 17.2266 70.6289 15.0254 70.3418C13.877 70.2461 13.4941 69.7676 13.4941 69.1934C13.4941 68.0449 15.4082 67.1836 17.3223 67.1836C20.0977 67.1836 22.4902 68.9063 24.9785 72.4473C26.8926 75.2227 28.9023 76.4668 31.2949 76.4668C33.6875 76.4668 35.2187 75.6055 37.4199 73.4043C39.0469 71.7773 40.291 70.3418 41.4395 69.3848Z" fill="white"/>
+      </g>
+      <defs><clipPath id="gh_fab_clip_dark"><rect width="98" height="96" fill="white"/></clipPath></defs>
+    </svg>
+    <svg class="gh-icon-light" viewBox="0 0 98 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g clip-path="url(#gh_fab_clip_light)">
+        <path d="M41.4395 69.3848C28.8066 67.8535 19.9062 58.7617 19.9062 46.9902C19.9062 42.2051 21.6289 37.0371 24.5 33.5918C23.2559 30.4336 23.4473 23.7344 24.8828 20.959C28.7109 20.4805 33.8789 22.4902 36.9414 25.2656C40.5781 24.1172 44.4062 23.543 49.0957 23.543C53.7852 23.543 57.6133 24.1172 61.0586 25.1699C64.0254 22.4902 69.2891 20.4805 73.1172 20.959C74.457 23.543 74.6484 30.2422 73.4043 33.4961C76.4668 37.1328 78.0937 42.0137 78.0937 46.9902C78.0937 58.7617 69.1934 67.6621 56.3691 69.2891C59.623 71.3945 61.8242 75.9883 61.8242 81.252L61.8242 91.2051C61.8242 94.0762 64.2168 95.7031 67.0879 94.5547C84.4102 87.9512 98 70.6289 98 49.1914C98 22.1074 75.9883 6.69539e-07 48.9043 4.309e-07C21.8203 1.92261e-07 -1.9479e-07 22.1074 -4.3343e-07 49.1914C-6.20631e-07 70.4375 13.4941 88.0469 31.6777 94.6504C34.2617 95.6074 36.75 93.8848 36.75 91.3008L36.75 83.6445C35.4102 84.2188 33.6875 84.6016 32.1562 84.6016C25.8398 84.6016 22.1074 81.1563 19.4277 74.7441C18.375 72.1602 17.2266 70.6289 15.0254 70.3418C13.877 70.2461 13.4941 69.7676 13.4941 69.1934C13.4941 68.0449 15.4082 67.1836 17.3223 67.1836C20.0977 67.1836 22.4902 68.9063 24.9785 72.4473C26.8926 75.2227 28.9023 76.4668 31.2949 76.4668C33.6875 76.4668 35.2187 75.6055 37.4199 73.4043C39.0469 71.7773 40.291 70.3418 41.4395 69.3848Z" fill="black"/>
+      </g>
+      <defs><clipPath id="gh_fab_clip_light"><rect width="98" height="96" fill="white"/></clipPath></defs>
+    </svg>
+  </a>
+
+  <!-- Окно установки зависимостей (этап 2) — общее для всех инструментов и
+       настроек. Открывается через window.openInstallModal(missingDepNames);
+       не блокирует работу насильно — можно закрыть крестиком/фоном (CLAUDE.md:
+       «приложение показывает варианты и действует только после выбора»). -->
+  <div class="modal-bg" id="installModal">
+    <div class="modal">
+      <button class="back" id="imCloseBtn" style="float:right;font-size:16px">✕</button>
+      <h3 id="imHeading">не найдены нужные компоненты</h3>
+
+      <div id="imList">
+        <p id="imIntro">Для этой операции не хватает:</p>
+        <ul class="miss-list" id="imMissList"></ul>
+        <button class="opt" id="imOptAuto">
+          <b>скачать автоматически в папку приложения (bin/)</b>
+          <span>приложение само скачает и разложит нужные файлы, с прогрессом</span>
+        </button>
+        <button class="opt" id="imOptManual">
+          <b>скачать самостоятельно с GitHub</b>
+          <span>ссылки на релизы — разложите файлы в bin/ сами</span>
+        </button>
+        <button class="opt" id="imOptPip">
+          <b>установить через pip / winget</b>
+          <span>готовые команды для установки в систему</span>
+        </button>
+      </div>
+
+      <div id="imAuto" class="hidden">
+        <button class="back" data-back>← назад к вариантам</button>
+        <div id="imAutoStart">
+          <div class="warn">Компоненты будут скачаны и распакованы. В процессе установки
+            временно потребуется до ~540 МБ свободного места, после завершения
+            останется занято ~335 МБ.</div>
+          <button id="imAutoStartBtn" style="width:100%">начать установку</button>
+        </div>
+        <div id="imAutoProgress" class="hidden">
+          <div class="bar"><i id="imBarFill"></i></div>
+          <div class="prog-line">
+            <span id="imProgPct">0%</span>
+            <span id="imProgStage"></span>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:10px">
+            <button class="ghost" id="imAutoCancelBtn">отменить</button>
+            <button class="hidden" id="imAutoCloseBtn" style="width:100%">закрыть</button>
+          </div>
+        </div>
+        <div id="imAutoMsg"></div>
+      </div>
+
+      <div id="imManual" class="hidden">
+        <button class="back" data-back>← назад к вариантам</button>
+        <div id="imManualGroups"></div>
+        <p style="margin-top:4px">После того как разложите файлы — перезапустите приложение.</p>
+      </div>
+
+      <div id="imPipWinget" class="hidden">
+        <button class="back" data-back>← назад к вариантам</button>
+        <div id="imPipGroups"></div>
+        <p style="margin-top:4px">Приложение эти команды не выполняет само — winget может
+          требовать подтверждения UAC, pip — наличия Python. После установки
+          перезапустите приложение.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    "use strict";
+    // yt-dlp/ffmpeg/ffprobe/deno -> ключ группы в core.DEP_GROUPS (ffmpeg и
+    // ffprobe идут одним пунктом — общий релиз/архив BtbN).
+    const DEP_GROUP_OF = {"yt-dlp":"yt-dlp","ffmpeg":"ffmpeg","ffprobe":"ffmpeg","deno":"deno"};
+    const DEP_LABEL = {"yt-dlp":"yt-dlp","ffmpeg":"ffmpeg","ffprobe":"ffprobe","deno":"Deno"};
+    const im = {groups:{}, binDir:"", targetGroups:[], job:null, pollTimer:null};
+    const g = (id) => document.getElementById(id);
+
+    function escapeHtmlIM(s){
+      return String(s||"").replace(/[&<>"']/g, c => (
+        {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    }
+
+    function imShowView(id){
+      ["imList","imAuto","imManual","imPipWinget"].forEach(v=>{
+        g(v).classList.toggle("hidden", v !== id);
+      });
+    }
+
+    window.openInstallModal = async function(missingDepNames, opts){
+      opts = opts || {};
+      const names = missingDepNames || [];
+      const groupKeys = Array.from(new Set(names.map(n => DEP_GROUP_OF[n]).filter(Boolean)));
+      if(!groupKeys.length) return;
+      im.targetGroups = groupKeys;
+      im.job = null;
+      g("imHeading").textContent = opts.forced ? "переустановка компонентов" : "не найдены нужные компоненты";
+      g("imIntro").textContent = opts.forced ? "Выберите способ переустановки:" : "Для этой операции не хватает:";
+      g("imMissList").innerHTML = names.map(n => `<li>${escapeHtmlIM(DEP_LABEL[n] || n)}</li>`).join("");
+      imShowView("imList");
+      g("installModal").classList.add("show");
+      try{
+        const info = await (await fetch("/api/deps/info")).json();
+        im.groups = info.groups || {};
+        im.binDir = info.bin_dir || "";
+      }catch(e){ im.groups = {}; }
+    };
+
+    function closeInstallModal(){
+      g("installModal").classList.remove("show");
+      imStopPoll();
+    }
+    g("installModal").addEventListener("click", e=>{ if(e.target.id === "installModal") closeInstallModal(); });
+    g("imCloseBtn").addEventListener("click", closeInstallModal);
+    document.querySelectorAll("#installModal [data-back]").forEach(b=>
+      b.addEventListener("click", ()=> imShowView("imList")));
+
+    g("imOptAuto").addEventListener("click", ()=>{
+      g("imAutoStart").classList.remove("hidden");
+      g("imAutoProgress").classList.add("hidden");
+      g("imAutoMsg").innerHTML = "";
+      imShowView("imAuto");
+    });
+
+    g("imOptManual").addEventListener("click", ()=>{
+      g("imManualGroups").innerHTML = im.targetGroups.map(k=>{
+        const grp = im.groups[k]; if(!grp) return "";
+        return `<div class="grp"><div class="glabel">${escapeHtmlIM(grp.label)}</div>
+          <div>релиз: <a href="${grp.release_url}" target="_blank" rel="noopener">${grp.release_url}</a></div>
+          <div style="margin-top:6px">положите файл(ы) в: <code>${escapeHtmlIM(im.binDir)}</code></div></div>`;
+      }).join("");
+      imShowView("imManual");
+    });
+
+    g("imOptPip").addEventListener("click", ()=>{
+      const wrap = g("imPipGroups");
+      wrap.innerHTML = im.targetGroups.map(k=>{
+        const grp = im.groups[k]; if(!grp) return "";
+        const cmd = grp.pip_cmd || grp.winget_cmd || "";
+        const note = grp.pip_cmd ? "рекомендуется ради автообновления" : "";
+        return `<div class="grp"><div class="glabel">${escapeHtmlIM(grp.label)}</div>
+          <div class="cmdrow"><code>${escapeHtmlIM(cmd)}</code>
+            <button class="ghost" data-copy="${escapeHtmlIM(cmd)}">копировать</button></div>
+          ${note ? `<div style="margin-top:6px;font-size:11px;color:var(--muted)">${note}</div>` : ""}
+          <div style="margin-top:8px;font-size:11.5px">запасной вариант (без Python/winget):
+            <a href="${grp.release_url}" target="_blank" rel="noopener">скачать с GitHub</a></div></div>`;
+      }).join("");
+      wrap.querySelectorAll("[data-copy]").forEach(btn=>{
+        btn.addEventListener("click", ()=>{
+          navigator.clipboard.writeText(btn.dataset.copy).then(()=>{
+            const old = btn.textContent; btn.textContent = "скопировано";
+            setTimeout(()=>{ btn.textContent = old; }, 1200);
+          }).catch(()=>{});
+        });
+      });
+      imShowView("imPipWinget");
+    });
+
+    g("imAutoStartBtn").addEventListener("click", async ()=>{
+      const btn = g("imAutoStartBtn");
+      btn.disabled = true;
+      try{
+        const res = await fetch("/api/deps/install", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({targets: im.targetGroups})
+        });
+        const d = await res.json();
+        if(!res.ok) throw new Error(d.error || "Не удалось запустить установку.");
+        im.job = d.job_id;
+        g("imAutoStart").classList.add("hidden");
+        g("imAutoProgress").classList.remove("hidden");
+        g("imAutoCancelBtn").classList.remove("hidden");
+        g("imAutoCloseBtn").classList.add("hidden");
+        imPollInstall();
+      }catch(e){
+        g("imAutoMsg").innerHTML = `<div class="msg err">${escapeHtmlIM(e.message)}</div>`;
+      }finally{ btn.disabled = false; }
+    });
+
+    function imPollInstall(){
+      imStopPoll();
+      im.pollTimer = setInterval(imPollOnce, 700);
+      imPollOnce();
+    }
+    function imStopPoll(){ if(im.pollTimer){ clearInterval(im.pollTimer); im.pollTimer = null; } }
+
+    function imFinish(msgHtml){
+      imStopPoll();
+      g("imAutoMsg").innerHTML = msgHtml;
+      g("imAutoCancelBtn").classList.add("hidden");
+      g("imAutoCloseBtn").classList.remove("hidden");
+    }
+
+    async function imPollOnce(){
+      if(!im.job) return;
+      try{
+        const res = await fetch("/api/status/" + im.job);
+        const s = await res.json();
+        const pct = Math.max(0, Math.min(100, s.progress || 0));
+        g("imBarFill").style.width = pct + "%";
+        g("imProgPct").textContent = (Math.round(pct*10)/10) + "%";
+        g("imProgStage").textContent = s.stage || "";
+        if(s.status === "done"){
+          imFinish('<div class="msg ok">Готово — зависимости установлены, можно продолжить.</div>');
+        }else if(s.status === "error"){
+          imFinish(`<div class="msg err">${escapeHtmlIM(s.error || "Ошибка установки.")}</div>`);
+        }else if(s.status === "canceled"){
+          imFinish('<div class="msg err">Установка отменена.</div>');
+        }
+      }catch(e){}
+    }
+
+    g("imAutoCancelBtn").addEventListener("click", async ()=>{
+      if(!im.job) return;
+      try{ await fetch("/api/cancel/" + im.job, {method:"POST"}); }catch(e){}
+    });
+    g("imAutoCloseBtn").addEventListener("click", closeInstallModal);
+  })();
+  </script>
+</body>
+</html>

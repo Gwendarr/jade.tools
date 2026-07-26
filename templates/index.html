@@ -1,0 +1,211 @@
+{% extends "_base.html" %}
+{% block title %}jade.tools{% endblock %}
+{% block head %}
+<style>
+  #diskWarning, #pathsWarning{padding:14px 16px;border-radius:var(--radius-sm);font-size:13px;
+              margin-bottom:20px;background:rgba(var(--error-rgb),.1);
+              border:1px solid rgba(var(--error-rgb),.4);color:var(--error);line-height:1.6}
+  #diskWarning .dw-link, #pathsWarning .dw-link{text-align:right;margin-top:4px}
+  #diskWarning a, #pathsWarning a{color:var(--error-bright);text-decoration:underline}
+
+  /* Уведомление об обновлении yt-dlp — плавающий тост снизу, не перекрывает
+     интерфейс (сам по себе, узкий). Закрывается крестиком в кружке в углу;
+     основная кнопка запускает реальное обновление (не просто ссылка). */
+  #updateToast{position:fixed;left:var(--rail-w,88px);right:0;bottom:22px;margin:0 auto;
+              max-width:520px;width:calc(100% - 40px);z-index:40;
+              background:var(--surface-2);border:1px solid var(--line-strong);
+              border-radius:var(--radius-sm);padding:12px 14px;
+              display:flex;align-items:center;gap:12px;
+              box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #updateToast .msg-text{flex:1;font-size:12.5px;line-height:1.5;color:var(--text)}
+  #updateToast button{flex:none;padding:8px 10px}
+  #updateToastClose{position:absolute;top:-9px;right:-9px;width:22px;height:22px;
+              padding:0;border-radius:50%;background:var(--surface-2);
+              border:1px solid var(--line-strong);color:var(--muted);
+              display:flex;align-items:center;justify-content:center;cursor:pointer}
+  #updateToastClose:hover{color:var(--text)}
+  #updateToastClose .ic{width:12px;height:12px;vertical-align:0}
+
+  /* Мягкое уведомление о недоступном cache (этап 4) — тот же тост-паттерн,
+     что у обновления yt-dlp, но повыше — оба могут быть на экране разом. */
+  #cacheToast{position:fixed;left:var(--rail-w,88px);right:0;bottom:90px;margin:0 auto;
+              max-width:520px;width:calc(100% - 40px);z-index:40;
+              background:var(--surface-2);border:1px solid var(--line-strong);
+              border-radius:var(--radius-sm);padding:12px 14px;
+              display:flex;align-items:center;gap:12px;
+              box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #cacheToast .msg-text{flex:1;font-size:12.5px;line-height:1.5;color:var(--text)}
+  #cacheToastClose{position:absolute;top:-9px;right:-9px;width:22px;height:22px;
+              padding:0;border-radius:50%;background:var(--surface-2);
+              border:1px solid var(--line-strong);color:var(--muted);
+              display:flex;align-items:center;justify-content:center;cursor:pointer}
+  #cacheToastClose:hover{color:var(--text)}
+  #cacheToastClose .ic{width:12px;height:12px;vertical-align:0}
+
+  /* Версия — прижата к низу окна, по центру контентной области: центр
+     считается без навигационного рейла (left:var(--rail-w), right:0). */
+  #versionTag{position:fixed;left:var(--rail-w,88px);right:0;bottom:10px;
+              text-align:center;font-size:11px;color:var(--muted);
+              pointer-events:none;z-index:5}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wrap">
+  <div id="diskWarning" class="hidden"></div>
+  <div id="pathsWarning" class="hidden"></div>
+
+  <div class="page-head">
+    <h1>jade.tools</h1>
+    <p>локальный набор инструментов — выберите нужный</p>
+  </div>
+
+  <div class="tiles">
+    {% for t in tools %}
+    <a class="tile" href="{{ t.url }}">
+      <div class="tile-icon">{{ t.icon|safe }}</div>
+      <div class="tile-name">{{ t.name }}</div>
+      <div class="tile-desc">{{ t.desc }}</div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <footer>работает локально через yt-dlp + ffmpeg. файлы сохраняются в папку <code>downloads/</code>.</footer>
+</div>
+
+<div id="versionTag">{{ version }}</div>
+
+<div id="updateToast" class="hidden">
+  <span class="msg-text" id="updateToastText"></span>
+  <button id="updateToastAction">обновить</button>
+  <button id="updateToastClose" title="закрыть"><span data-icon="x"></span></button>
+</div>
+
+<div id="cacheToast" class="hidden">
+  <span class="msg-text">Папка кэша недоступна — кэш временно отключён (скачивания работают, просто без переиспользования уже скачанных роликов).</span>
+  <button id="cacheToastClose" title="закрыть"><span data-icon="x"></span></button>
+</div>
+
+<!-- Temp недоступен (этап 4) — БЛОКИРУЮЩАЯ модалка: только два продуктивных
+     выхода, без крестика/клика по фону — «глухая отмена» заперла бы юзера,
+     не подсказав, что делать (см. CLAUDE.md, задание этапа 4). -->
+<div class="modal-bg" id="tempUnavailableModal">
+  <div class="modal">
+    <h3>папка temp недоступна</h3>
+    <p id="tempModalText"></p>
+    <div class="actions">
+      <button class="ghost" id="tempModalSettingsBtn">открыть настройки</button>
+      <button id="tempModalUseAppBtn">да, использовать папку приложения</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function(){
+  // Предупреждение о месте на диске — красный баннер сверху главного экрана.
+  fetch("/api/disk_check").then(r=>r.json()).then(d=>{
+    if(!d || !d.warning) return;
+    const el = document.getElementById("diskWarning");
+    el.innerHTML = '<div>' + d.message + '</div>'
+      + '<div class="dw-link"><a href="/settings/">открыть настройки →</a></div>';
+    el.classList.remove("hidden");
+  }).catch(()=>{});
+
+  // Доступность temp/cache (этап 4): постоянный баннер, пока хоть один
+  // недоступен (для обоих сразу, если оба сломаны) + отдельно блокирующая
+  // модалка для temp и мягкий тост для cache.
+  fetch("/api/paths_status").then(r=>r.json()).then(d=>{
+    if(!d) return;
+    const brokenTemp = d.temp && !d.temp.available;
+    const brokenCache = d.cache && !d.cache.available;
+    if(brokenTemp || brokenCache){
+      const which = brokenTemp && brokenCache ? "temp и cache"
+                   : brokenTemp ? "temp" : "cache";
+      const el = document.getElementById("pathsWarning");
+      el.innerHTML = `<div>⚠ Папка ${which} недоступна, откройте настройки</div>`
+        + '<div class="dw-link"><a href="/settings/">открыть настройки →</a></div>';
+      el.classList.remove("hidden");
+    }
+
+    if(brokenTemp){
+      const modal = document.getElementById("tempUnavailableModal");
+      document.getElementById("tempModalText").textContent =
+        `Папка временных файлов недоступна: ${d.temp.path}. Использовать папку приложения?`;
+      modal.classList.add("show");
+
+      document.getElementById("tempModalSettingsBtn").addEventListener("click", ()=>{
+        window.location.href = "/settings/";
+      });
+      document.getElementById("tempModalUseAppBtn").addEventListener("click", async ()=>{
+        const btn = document.getElementById("tempModalUseAppBtn");
+        btn.disabled = true; btn.textContent = "переключаю…";
+        try{
+          await fetch("/settings/api/save", {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({temp_mode: "app"})
+          });
+          modal.classList.remove("show");
+        }catch(e){
+          btn.disabled = false; btn.textContent = "да, использовать папку приложения";
+        }
+      });
+    }
+
+    if(brokenCache){
+      const toast = document.getElementById("cacheToast");
+      toast.classList.remove("hidden");
+      document.getElementById("cacheToastClose").addEventListener("click", ()=>{
+        toast.classList.add("hidden");
+      });
+    }
+  }).catch(()=>{});
+
+  // Проверка обновления yt-dlp — необязательное уведомление снизу, можно закрыть
+  // крестиком или сразу обновить кнопкой "обновить" (запускает pip install -U).
+  fetch("/api/ytdlp_update_check").then(r=>r.json()).then(d=>{
+    if(!d || d.status !== "available") return;
+    const key = "jade_ytdlp_update_dismissed_" + (d.latest || "");
+    if(sessionStorage.getItem(key)) return;   // уже закрывали для этой версии
+
+    const toast = document.getElementById("updateToast");
+    const text = document.getElementById("updateToastText");
+    const action = document.getElementById("updateToastAction");
+    toast.classList.remove("hidden");
+
+    document.getElementById("updateToastClose").addEventListener("click", ()=>{
+      toast.classList.add("hidden");
+      try{ sessionStorage.setItem(key, "1"); }catch(e){}
+    });
+
+    // "system-other" — установлено в системе не через pip (winget, ручной exe
+    // в PATH): приложение это не трогает, кнопки обновления нет вовсе, только
+    // сообщение с просьбой обновить вручную (см. core.ytdlp_source_kind).
+    if(d.source_kind === "system-other"){
+      text.textContent = d.message + " Обновите вручную — установлено в системе, не через pip.";
+      action.remove();
+      return;
+    }
+    text.textContent = d.message;
+
+    action.addEventListener("click", async ()=>{
+      action.disabled = true;
+      action.textContent = "обновляется…";
+      try{
+        const res = await (await fetch("/api/ytdlp_update_do", {method:"POST"})).json();
+        text.textContent = res.message || "Не удалось обновить yt-dlp.";
+        if(res.status === "updated"){
+          action.remove();   // обновление удалось — кнопка больше не нужна
+        }else{
+          action.disabled = false;
+          action.textContent = "повторить";
+        }
+      }catch(e){
+        text.textContent = "Не удалось обновить yt-dlp: ошибка запроса.";
+        action.disabled = false;
+        action.textContent = "повторить";
+      }
+    });
+  }).catch(()=>{});
+})();
+</script>
+{% endblock %}

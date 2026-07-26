@@ -1,0 +1,22 @@
+# Сборка
+dist/
+build/
+__pycache__/
+*.pyc
+
+# Внешние бинарники и рабочие/пользовательские данные (создаются сами при запуске)
+bin/
+temp/
+cache/
+logs/
+downloads/
+cookies*.txt
+settings.json
+
+# Инструменты разработки / чистый экспорт
+.claude/
+_clean_export/
+jade.tools_*.zip
+
+CLAUDE.md
+make_clean_zip.bat

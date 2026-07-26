@@ -1,0 +1,989 @@
+{% extends "_base.html" %}
+{% block title %}Нарезка — jade.tools{% endblock %}
+{% block head %}
+<style>
+  /* Страница нарезки шире остальных инструментов (≈ ×1.5 от базовых 560px). */
+  .wrap{max-width:840px}
+
+  .ed-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+  .ed-head .preview{flex:1;min-width:0}
+  .vol{display:flex;align-items:center;gap:8px;flex:none;padding-top:2px}
+  .vol-ic{font-size:15px;opacity:.85}
+  .vol input[type=range]{width:104px;accent-color:var(--accent);cursor:pointer;background:transparent}
+  #audioTrackWrap{flex:none;align-self:center}
+  #audioTrack{padding:8px 10px;font-size:12px;width:auto;min-width:130px;max-width:260px}
+  .chk-row{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:13px;
+           color:var(--text);text-transform:lowercase;letter-spacing:.3px;font-weight:500}
+  .chk-row input{width:17px;height:17px;accent-color:var(--accent);cursor:pointer;margin:0}
+
+  #vplayer{width:100%;max-height:240px;background:var(--surface-2);border-radius:var(--radius-sm);
+           border:1px solid var(--line);display:block;margin-bottom:12px}
+
+  /* Видеоряд (полоса кадров) — рисуется на canvas, чтобы зум делал кадры крупнее */
+  #stripCanvas{display:block;width:100%;height:48px;background:var(--surface-2);
+               border:1px solid var(--line);border-bottom:0;
+               border-radius:var(--radius-sm) var(--radius-sm) 0 0;cursor:ew-resize}
+
+  .wave-wrap{position:relative;background:var(--surface-2);border:1px solid var(--line);
+             border-radius:var(--radius-sm);overflow:hidden;user-select:none;touch-action:none}
+  .wave-wrap.with-strip{border-radius:0 0 var(--radius-sm) var(--radius-sm)}
+  #waveCanvas{display:block;width:100%;height:150px;cursor:text}
+  /* Чипы поверх волны/видеоряда — фон нарочно всегда тёмный (как таймкод на
+     видео), поэтому текст фиксированно светлый, а не через var(--text)/
+     var(--muted): в светлой теме те стали бы тёмными и слились бы с фоном. */
+  .corner{position:absolute;bottom:8px;font-size:11px;color:#fff;pointer-events:none;
+          background:rgba(0,0,0,.45);padding:2px 7px;border-radius:6px;letter-spacing:.3px}
+  .corner.l{left:8px} .corner.r{right:8px}
+  .zoomhint{position:absolute;top:6px;right:8px;font-size:10px;color:rgba(255,255,255,.7);
+            background:rgba(0,0,0,.4);padding:1px 6px;border-radius:6px;pointer-events:none}
+  .handle{position:absolute;top:0;height:100%;width:16px;margin-left:-8px;cursor:ew-resize;z-index:4}
+  .handle::before{content:"";position:absolute;left:7px;top:0;width:2px;height:100%;background:var(--accent)}
+  .handle::after{content:"";position:absolute;left:2px;top:50%;transform:translateY(-50%);
+                 width:12px;height:30px;border-radius:4px;background:var(--accent);
+                 box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+
+  .times{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px}
+  .time-field{width:172px;text-align:center;font-variant-numeric:tabular-nums}
+  .times .dash{color:var(--muted);margin:0 2px}
+  .nudge{display:grid;grid-template-columns:auto auto;gap:2px;flex:none}
+  .nudge button{min-width:0;width:32px;height:20px;padding:0;font-size:10px;line-height:1;
+                background:var(--surface-2);border:1px solid var(--line);color:var(--muted);
+                border-radius:6px;text-transform:none}
+  .nudge button:hover{background:var(--surface-hover);color:var(--text);opacity:1}
+
+  .player{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .player .spacer{flex:1}
+  .player .dur{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .pbtn{min-width:46px}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>нарезать</h1>
+    <p>вырезать фрагмент из аудио или видео — по волне, кадрам и таймингам</p>
+  </div>
+
+  <!-- Источник -->
+  <div class="card" id="sourceCard">
+    <div class="drop" id="drop">
+      <div class="big">перетащите аудио или видео сюда либо нажмите, чтобы выбрать</div>
+      <div class="small">mp4, mkv, mov, mp3, m4a, wav и другие</div>
+    </div>
+    <input id="fileInput" type="file" accept="audio/*,video/*" class="hidden">
+    <div class="or">или</div>
+    <label for="url">ссылка на видео (youtube и другие сайты)</label>
+    <div class="url-row">
+      <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+      <button id="btnFetch">получить</button>
+    </div>
+    <p class="hint">подойдёт и ссылка с другого сайта, который поддерживает <code>yt-dlp</code>
+      (TikTok, Instagram и т.д.) — ролик скачивается во временную папку, затем строятся волна и кадры.</p>
+    <p class="hint">для ссылки с YouTube-таймкодом (<code>?t=</code>, <code>&amp;start=</code>, <code>#t=</code>)
+      маркер начала фрагмента подставляется автоматически.</p>
+    <div id="srcMsg"></div>
+  </div>
+
+  <!-- Выбор качества (для видео из ссылки) -->
+  <div class="card hidden" id="qualityCard">
+    <div class="preview" id="qInfo"></div>
+    <div style="height:14px"></div>
+    <div class="grid">
+      <div id="qResWrap">
+        <label>качество видео</label>
+        <select id="quality"></select>
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button id="btnPrepare" style="width:100%"><span data-icon="download"></span> подготовить</button>
+      </div>
+    </div>
+    <div id="qMsg"></div>
+  </div>
+
+  <!-- Подготовка -->
+  <div class="card hidden" id="prepCard">
+    <label id="prepTitle">подготовка…</label>
+    <div class="bar"><i id="prepFill"></i></div>
+    <div class="prog-line"><span id="prepPct">0%</span><span id="prepStage"></span></div>
+    <div style="margin-top:12px"><button id="btnPrepCancel" class="ghost">отменить</button></div>
+    <div id="prepMsg"></div>
+  </div>
+
+  <!-- Редактор -->
+  <div class="card hidden" id="editor">
+    <div class="ed-head">
+      <div class="preview" id="trackInfo"></div>
+      <div id="audioTrackWrap" class="hidden">
+        <select id="audioTrack" title="аудиодорожка"></select>
+      </div>
+      <div class="vol" title="громкость">
+        <span class="vol-ic" data-icon="volume"></span>
+        <input type="range" id="volume" min="0" max="100" value="100">
+      </div>
+    </div>
+
+    <div style="height:14px"></div>
+    <video id="vplayer" class="hidden" preload="metadata" playsinline></video>
+    <audio id="aplayer" class="hidden" preload="metadata"></audio>
+
+    <canvas id="stripCanvas" class="hidden"></canvas>
+    <div class="wave-wrap" id="waveWrap">
+      <canvas id="waveCanvas"></canvas>
+      <div class="handle" id="handleL"></div>
+      <div class="handle" id="handleR"></div>
+      <span class="corner l" id="cornerStart">00:00.000</span>
+      <span class="corner r" id="cornerEnd">00:00.000</span>
+      <span class="zoomhint hidden" id="zoomHint"></span>
+    </div>
+
+    <div class="times">
+      <input class="time-field" id="tStart" type="text" inputmode="decimal" value="00:00.000">
+      <span class="nudge" data-which="start">
+        <button data-step="sec" data-dir="-1" title="-1 секунда">-1s</button>
+        <button data-step="sec" data-dir="1" title="+1 секунда">+1s</button>
+        <button data-step="frame" data-dir="-1" title="-1 кадр">-1f</button>
+        <button data-step="frame" data-dir="1" title="+1 кадр">+1f</button>
+      </span>
+      <span class="dash">—</span>
+      <span class="nudge" data-which="end">
+        <button data-step="sec" data-dir="-1" title="-1 секунда">-1s</button>
+        <button data-step="sec" data-dir="1" title="+1 секунда">+1s</button>
+        <button data-step="frame" data-dir="-1" title="-1 кадр">-1f</button>
+        <button data-step="frame" data-dir="1" title="+1 кадр">+1f</button>
+      </span>
+      <input class="time-field" id="tEnd" type="text" inputmode="decimal" value="00:00.000">
+    </div>
+    <div class="hint hidden" id="tsHint" style="text-align:center;margin-top:6px"></div>
+
+    <div class="player">
+      <button class="pbtn ghost" id="btnPlay" title="играть от позиции">▶</button>
+      <button class="ghost" id="btnPlaySel">▶ фрагмент</button>
+      <span class="spacer"></span>
+      <span class="dur" id="selDur"></span>
+    </div>
+
+    <div style="height:16px"></div>
+    <div id="outModeWrap" class="hidden">
+      <label>что сохранить</label>
+      <div class="seg" id="outModeSeg">
+        <button data-mode="video" class="active"><span data-icon="clapperboard"></span> видео</button>
+        <button data-mode="audio"><span data-icon="music"></span> звук</button>
+      </div>
+      <div style="height:12px"></div>
+    </div>
+
+    <div id="compressWrap" class="hidden">
+      <label class="chk-row"><input type="checkbox" id="compressToggle"> сжать</label>
+      <div id="compressMenu" class="hidden">
+        <div style="height:12px"></div>
+        <div class="grid grid3">
+          <div>
+            <label>целевой размер, МБ</label>
+            <input id="targetMb" type="number" min="1" step="1" value="{{ settings.compress_target_mb or 25 }}">
+            <div class="presets">
+              <button class="ghost" data-mb="10">10</button>
+              <button class="ghost" data-mb="15">15</button>
+              <button class="ghost" data-mb="25">25</button>
+              <button class="ghost" data-mb="50">50</button>
+              <button class="ghost" data-mb="100">100</button>
+            </div>
+          </div>
+          <div>
+            <label>разрешение</label>
+            <select id="resolution">
+              <option value="0" selected>исходное</option>
+              <option value="2160">2160p (4K)</option>
+              <option value="1440">1440p</option>
+              <option value="1080">1080p</option>
+              <option value="720">720p</option>
+              <option value="480">480p</option>
+              <option value="360">360p</option>
+              <option value="240">240p</option>
+              <option value="144">144p</option>
+            </select>
+          </div>
+          <div>
+            <label>битрейт звука</label>
+            <select id="audioKbps">
+              <option value="96" {% if settings.compress_audio_kbps == 96 %}selected{% endif %}>96 kbps</option>
+              <option value="128" {% if settings.compress_audio_kbps == 128 %}selected{% endif %}>128 kbps</option>
+              <option value="192" {% if settings.compress_audio_kbps == 192 or not settings.compress_audio_kbps %}selected{% endif %}>192 kbps</option>
+              <option value="256" {% if settings.compress_audio_kbps == 256 %}selected{% endif %}>256 kbps</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div style="height:16px"></div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <label>формат</label>
+        <select id="outFmt"></select>
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button id="btnTrim" style="width:100%"><span data-icon="scissors"></span> обрезать</button>
+      </div>
+    </div>
+
+    <div style="height:12px"></div>
+    <button id="btnReset" class="ghost" style="width:100%">← другой файл</button>
+  </div>
+
+  <!-- Прогресс нарезки -->
+  <div class="card hidden" id="progressCard">
+    <label id="progTitle">нарезка…</label>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="prog-line"><span id="progPct">0%</span><span id="progStage"></span></div>
+    <div style="margin-top:12px;display:flex;gap:10px">
+      <button id="btnCancel" class="ghost">отменить</button>
+      <a id="btnGetFile" class="hidden" href="#" style="text-decoration:none">
+        <button style="width:100%"><span data-icon="save"></span> сохранить файл</button>
+      </a>
+    </div>
+    <div id="progMsg"></div>
+  </div>
+
+  <footer>волна и кадры строятся локально через ffmpeg. колёсико — зум, двойной клик — весь трек, пробел — пауза.</footer>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const ACCENT = (getComputedStyle(document.documentElement)
+                .getPropertyValue("--accent") || "#21c98a").trim();
+// Плейхед/заглушка волны рисуются на canvas — тоже читаем цвет из переменных
+// темы (тот же паттерн, что ACCENT), а не зашиваем "#fff"/белый напрямую:
+// на светлой теме белый плейхед был бы не виден на светлом фоне канваса.
+const TEXT_COLOR = (getComputedStyle(document.documentElement)
+                    .getPropertyValue("--text") || "#e3e3e3").trim();
+const LINE_COLOR = (getComputedStyle(document.documentElement)
+                    .getPropertyValue("--line-strong") || "#3a3a3a").trim();
+
+let ed = null;            // {job_id, duration, peaks, has_video, fps, start, end, pos}
+let view = {a:0, b:0};    // видимый диапазон времени (для зума)
+let prepTimer = null, trimTimer = null, autoSaved = null, prepJob = null;
+let AUDIO_FMTS = [];
+
+// Таймкод, распознанный из вставленной ссылки (секунды) — см. btnFetch и
+// initEditor. null у обычной загрузки файла и у ссылок без таймкода (в т.ч.
+// не-YouTube сайты — единого стандарта таймкода в ссылке у них нет).
+let parsedTimestampSec = null;
+// Настройка «длина фрагмента по умолчанию для ссылки с таймкодом» — влияет
+// ТОЛЬКО когда таймкод реально распознан (см. initEditor); "" в настройках →
+// null здесь → маркер конца остаётся на всей длительности, как раньше.
+const DEFAULT_CLIP_LEN = (function(){
+  const v = parseFloat({{ settings.default_clip_length_for_timestamp_link|tojson }});
+  return (isFinite(v) && v > 0) ? v : null;
+})();
+
+function setMsg(el, t, type){ el.innerHTML = t ? `<div class="msg ${type}">${escapeHtml(t)}</div>` : ""; }
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, c => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+  ));
+}
+function fmtTime(s, tenths){
+  s = Math.max(0, s||0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), whole = Math.floor(s%60);
+  const t = Math.floor((s - Math.floor(s))*10);
+  const mm = String(m).padStart(2,"0"), ss = String(whole).padStart(2,"0");
+  const base = h>0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  return tenths ? `${base}.${t}` : base;
+}
+function fmtTimePos(s){
+  // Позиция на таймлайне (не длительность!): полные миллисекунды + текущий
+  // кадр в скобках (только для видео — у fps>0 есть дискретные кадры;
+  // у аудио кадра нет, шаг нарезки там 0.1с — см. frameStep()).
+  s = Math.max(0, s||0);
+  let ms = Math.round((s % 1) * 1000);
+  let totalSec = Math.floor(s);
+  if(ms >= 1000){ ms = 0; totalSec += 1; }
+  const h = Math.floor(totalSec/3600), m = Math.floor((totalSec%3600)/60), whole = totalSec%60;
+  const mm = String(m).padStart(2,"0"), ss = String(whole).padStart(2,"0");
+  const msStr = String(ms).padStart(3,"0");
+  const base = h>0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  let out = `${base}.${msStr}`;
+  if(ed && ed.fps > 0){
+    const frame = Math.max(0, Math.floor((s % 1) * ed.fps));
+    out += ` (${frame}f)`;
+  }
+  return out;
+}
+function parseTime(str){
+  str = String(str).trim().replace(",", ".");
+  if(!str) return null;
+  const p = str.split(":");
+  let sec;
+  if(p.length === 1) sec = parseFloat(p[0]);
+  else if(p.length === 2) sec = (parseInt(p[0],10)||0)*60 + parseFloat(p[1]);
+  else if(p.length === 3) sec = (parseInt(p[0],10)||0)*3600 + (parseInt(p[1],10)||0)*60 + parseFloat(p[2]);
+  else return null;
+  return isFinite(sec) ? Math.max(0, sec) : null;
+}
+const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+
+// ============ Таймкод из ссылки (YouTube) ============
+// "95" (секунды) или "1h2m3s"/"1m35s" (компактный формат, любая часть может
+// отсутствовать) → секунды. Прочее (в т.ч. пустая строка) — null.
+function parseYoutubeTimeToken(tok){
+  tok = String(tok==null ? "" : tok).trim();
+  if(!tok) return null;
+  if(/^\d+$/.test(tok)) return parseInt(tok, 10);
+  const m = tok.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
+  if(m && (m[1] || m[2] || m[3])){
+    const h = parseInt(m[1]||"0",10), mi = parseInt(m[2]||"0",10), s = parseInt(m[3]||"0",10);
+    return h*3600 + mi*60 + s;
+  }
+  return null;
+}
+// Таймкод специфичен для YouTube — у других сайтов, поддерживаемых yt-dlp,
+// единого стандарта таймкода в ссылке нет, для них всегда возвращает null.
+// Форматы: ?t=95, ?t=1m35s, &start=95 (embed), #t=1m35s (fragment — не
+// query-параметр, разбирается отдельной регуляркой).
+function parseTimestampFromUrl(url){
+  url = String(url || "");
+  if(!url) return null;
+  const hashMatch = url.match(/#t=([0-9hms]+)/i);
+  if(hashMatch){
+    const v = parseYoutubeTimeToken(hashMatch[1]);
+    if(v != null) return v;
+  }
+  const query = url.split("#")[0];
+  const tMatch = query.match(/[?&]t=([^&]+)/i);
+  if(tMatch){
+    const v = parseYoutubeTimeToken(decodeURIComponent(tMatch[1]));
+    if(v != null) return v;
+  }
+  const startMatch = query.match(/[?&]start=([^&]+)/i);
+  if(startMatch){
+    const v = parseYoutubeTimeToken(decodeURIComponent(startMatch[1]));
+    if(v != null) return v;
+  }
+  return null;
+}
+
+// ============ Загрузка источника ============
+const drop = $("drop"), fileInput = $("fileInput");
+drop.addEventListener("click", ()=> fileInput.click());
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev, e=>{
+  e.preventDefault(); drop.classList.add("over");
+}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev, e=>{
+  e.preventDefault(); drop.classList.remove("over");
+}));
+drop.addEventListener("drop", e=>{
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f) uploadFile(f);
+});
+fileInput.addEventListener("change", ()=>{
+  const f = fileInput.files && fileInput.files[0];
+  if(f) uploadFile(f);
+});
+
+async function uploadFile(file){
+  // Локальная загрузка — таймкод из ранее введённой (и, возможно, брошенной)
+  // ссылки сюда не должен просачиваться, см. «Видимая обратная связь» в задаче.
+  parsedTimestampSec = null;
+  drop.querySelector(".big").textContent = file.name;
+  setMsg($("srcMsg"), "Загрузка…", "ok");
+  const fd = new FormData(); fd.append("file", file);
+  try{
+    const res = await fetch("/trim/api/upload", {method:"POST", body:fd});
+    const d = await res.json();
+    if(!res.ok){
+      if(d.need_install){ openInstallModal(d.missing_deps); return; }
+      throw new Error(d.error || "Ошибка загрузки");
+    }
+    setMsg($("srcMsg"), "", "");
+    $("sourceCard").classList.add("hidden");
+    $("prepCard").classList.remove("hidden");
+    startPrepPoll(d.job_id);
+  }catch(e){ setMsg($("srcMsg"), e.message, "err"); }
+}
+
+$("btnFetch").addEventListener("click", async ()=>{
+  const url = $("url").value.trim();
+  if(!url){ setMsg($("srcMsg"), "Вставьте ссылку.", "err"); return; }
+  const b = $("btnFetch"); b.disabled = true; b.textContent = "Получаю…";
+  try{
+    const res = await fetch("/trim/api/info", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({url})
+    });
+    const d = await res.json();
+    if(!res.ok) throw new Error(d.error || "Ошибка");
+    parsedTimestampSec = parseTimestampFromUrl(url);
+    setMsg($("srcMsg"), "", "");
+    showQuality(d);
+  }catch(e){ setMsg($("srcMsg"), e.message, "err"); }
+  finally{ b.disabled = false; b.textContent = "получить"; }
+});
+$("url").addEventListener("keydown", e=>{ if(e.key === "Enter") $("btnFetch").click(); });
+
+function showQuality(d){
+  prepJob = d.job_id;
+  $("qInfo").innerHTML =
+    `<div class="meta"><h3>${escapeHtml(d.title||"media")}</h3>` +
+    `<div class="sub">${ICONS.timer} ${fmtTime(d.duration, true)}  ·  ${d.has_video?ICONS.clapperboard+" видео":ICONS.music+" аудио"}</div></div>`;
+  const sel = $("quality"); sel.innerHTML = "";
+  if(d.has_video && d.heights && d.heights.length){
+    $("qResWrap").classList.remove("hidden");
+    const auto = document.createElement("option");
+    auto.value = "0"; auto.textContent = "наилучшее"; sel.appendChild(auto);
+    d.heights.forEach(h=>{
+      const o = document.createElement("option");
+      o.value = String(h); o.textContent = h + "p" + (h>=2160?" (4K)":"");
+      if(h === 1080) o.selected = true;
+      sel.appendChild(o);
+    });
+  }else{ $("qResWrap").classList.add("hidden"); }
+  $("sourceCard").classList.add("hidden");
+  $("qualityCard").classList.remove("hidden");
+}
+
+$("btnPrepare").addEventListener("click", async ()=>{
+  if(!prepJob) return;
+  const height = parseInt($("quality").value, 10) || 0;
+  const b = $("btnPrepare"); b.disabled = true; b.textContent = "Запускаю…";
+  try{
+    const res = await fetch("/trim/api/prepare", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({job_id: prepJob, height})
+    });
+    const d = await res.json();
+    if(!res.ok){
+      if(d.need_install){ openInstallModal(d.missing_deps); return; }
+      throw new Error(d.error || "Ошибка");
+    }
+    $("qualityCard").classList.add("hidden");
+    $("prepCard").classList.remove("hidden");
+    setMsg($("prepMsg"), "", "");
+    startPrepPoll(prepJob);
+  }catch(e){ setMsg($("qMsg"), e.message, "err"); }
+  finally{ b.disabled = false; b.innerHTML = ICONS.download + " подготовить"; }
+});
+
+function startPrepPoll(id){
+  stopPrepPoll(); prepJob = id;
+  prepTimer = setInterval(()=> prepOnce(id), 700);
+  prepOnce(id);
+}
+function stopPrepPoll(){ if(prepTimer){ clearInterval(prepTimer); prepTimer = null; } }
+
+async function prepOnce(id){
+  try{
+    const res = await fetch("/api/status/" + id);
+    const s = await res.json();
+    const pct = Math.max(0, Math.min(100, s.progress||0));
+    $("prepFill").style.width = pct + "%";
+    $("prepPct").textContent = Math.round(pct) + "%";
+    $("prepStage").textContent = s.stage || "";
+    const titles = {pending:"подготовка…", downloading:"скачивание…", processing:"анализ…"};
+    $("prepTitle").textContent = titles[s.status] || s.status;
+    if(s.status === "ready"){
+      stopPrepPoll();
+      const d = await (await fetch("/trim/api/data/" + id)).json();
+      d.job_id = id;
+      $("prepCard").classList.add("hidden");
+      initEditor(d);
+    }else if(s.status === "error" || s.status === "canceled"){
+      stopPrepPoll();
+      setMsg($("prepMsg"), s.error || "Не удалось подготовить.", "err");
+    }
+  }catch(e){}
+}
+
+$("btnPrepCancel").addEventListener("click", async ()=>{
+  if(prepJob){ try{ await fetch("/api/cancel/" + prepJob, {method:"POST"}); }catch(e){} }
+  stopPrepPoll();
+  $("prepCard").classList.add("hidden");
+  $("sourceCard").classList.remove("hidden");
+});
+
+$("btnReset").addEventListener("click", ()=> location.reload());
+
+// ============ Редактор ============
+const waveCanvas = $("waveCanvas"), wctx = waveCanvas.getContext("2d");
+const stripCanvas = $("stripCanvas"), sctx = stripCanvas.getContext("2d");
+let player = null;
+// видеоряд: текущая полоса покрывает участок [stripA, stripB] из stripN кадров
+let stripImg = null, stripA = 0, stripB = 0, stripN = 0, stripTimer = null;
+
+function initEditor(d){
+  ed = {
+    job_id: d.job_id, duration: d.duration || 0, peaks: d.peaks || [],
+    has_video: !!d.has_video, fps: d.fps || 0,
+    start: 0, end: d.duration || 0, pos: 0,
+  };
+  // Таймкод из ссылки → маркер начала (клампится в границы видео — битая/не
+  // та ссылка не должна ронять редактор). Маркер конца двигается вместе с
+  // ним ТОЛЬКО если задана настройка «длина фрагмента по умолчанию» — иначе
+  // как раньше, на всю длительность.
+  if(parsedTimestampSec != null){
+    ed.start = clamp(parsedTimestampSec, 0, ed.duration);
+    if(DEFAULT_CLIP_LEN){
+      ed.end = clamp(ed.start + DEFAULT_CLIP_LEN, ed.start + 0.05, ed.duration);
+    }
+    $("tsHint").textContent = "таймкод определён: " + fmtTime(ed.start, false);
+    $("tsHint").classList.remove("hidden");
+  }else{
+    $("tsHint").textContent = "";
+    $("tsHint").classList.add("hidden");
+  }
+  view = {a: 0, b: ed.duration || 1};
+  $("sourceCard").classList.add("hidden");
+  $("qualityCard").classList.add("hidden");
+  $("editor").classList.remove("hidden");
+  $("progressCard").classList.add("hidden");
+
+  const sub = [];
+  if(ed.duration) sub.push(ICONS.timer + " " + fmtTime(ed.duration, true));
+  if(ed.has_video && d.width) sub.push(`${ICONS.clapperboard} ${d.width}×${d.height}` + (ed.fps?` · ${Math.round(ed.fps)}fps`:""));
+  else if(!ed.has_video) sub.push(ICONS.music + " аудио");
+  $("trackInfo").innerHTML =
+    `<div class="meta"><h3>${escapeHtml(d.title||"media")}</h3>` +
+    `<div class="sub">${sub.join("  ·  ")}</div></div>`;
+
+  const mediaUrl = "/trim/api/media/" + encodeURIComponent(d.job_id);
+  const vp = $("vplayer"), ap = $("aplayer");
+  stripImg = null; stripN = 0;
+  if(ed.has_video){
+    player = vp; vp.src = mediaUrl; vp.classList.remove("hidden"); ap.classList.add("hidden");
+    if(d.filmstrip){
+      stripCanvas.classList.remove("hidden");
+      $("waveWrap").classList.add("with-strip");
+      $("zoomHint").classList.remove("hidden"); $("zoomHint").textContent = "колёсико — зум";
+      scheduleStrip();                 // полоса кадров для всего трека (потом — под зум)
+    }else{ stripCanvas.classList.add("hidden"); $("waveWrap").classList.remove("with-strip"); }
+    $("outModeWrap").classList.remove("hidden");
+    setOutMode("video");
+  }else{
+    player = ap; ap.src = mediaUrl; ap.classList.add("hidden"); vp.classList.add("hidden");
+    stripCanvas.classList.add("hidden");
+    $("waveWrap").classList.remove("with-strip");
+    $("zoomHint").classList.remove("hidden"); $("zoomHint").textContent = "колёсико — зум";
+    $("outModeWrap").classList.add("hidden");
+    setOutMode("audio");
+  }
+  // Выбор аудиодорожки — только если их несколько.
+  const tracks = d.audio_tracks || [];
+  const aw = $("audioTrackWrap"), asel = $("audioTrack");
+  if(tracks.length > 1){
+    asel.innerHTML = "";
+    tracks.forEach((t, i)=>{
+      const o = document.createElement("option");
+      o.value = i;
+      o.textContent = `Аудиодорожка №${i+1}` + (t.label ? ` - ${t.label}` : "");
+      asel.appendChild(o);
+    });
+    aw.classList.remove("hidden");
+  }else{
+    aw.classList.add("hidden");
+  }
+
+  player.volume = (parseInt($("volume").value, 10) || 100) / 100;
+  player.onloadedmetadata = ()=>{
+    if((!ed.duration || !isFinite(ed.duration)) && isFinite(player.duration)){
+      ed.duration = player.duration; ed.end = ed.duration; view = {a:0,b:ed.duration}; refresh(); scheduleStrip();
+    }
+  };
+  attachPlayerEvents();
+  fitCanvas(); refresh();
+}
+
+function W(){ return waveCanvas.clientWidth || 1; }
+function vlen(){ return Math.max(1e-6, view.b - view.a); }
+function t2x(t){ return (t - view.a)/vlen() * W(); }
+function x2t(x){ return view.a + (x/W())*vlen(); }
+
+function fitCanvas(){
+  const dpr = window.devicePixelRatio || 1;
+  [[waveCanvas,wctx],[stripCanvas,sctx]].forEach(([cv,cx])=>{
+    const w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = Math.max(1, Math.round(w*dpr));
+    cv.height = Math.max(1, Math.round(h*dpr));
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+}
+
+function drawStrip(){
+  if(!ed || !ed.has_video || stripCanvas.classList.contains("hidden")) return;
+  const w = stripCanvas.clientWidth, h = stripCanvas.clientHeight;
+  sctx.clearRect(0, 0, w, h);
+  if(stripImg && stripImg.complete && stripImg.naturalWidth && stripN){
+    // Полоса покрывает участок [stripA, stripB]. Каждый кадр рисуем в натуральных
+    // пропорциях (со сжатием /2 по горизонтали), выбирая ближайший по времени.
+    const cellSrcW = stripImg.naturalWidth / stripN;
+    const aspect = cellSrcW / stripImg.naturalHeight;
+    const cellW = Math.max(6, h * aspect / 2);
+    const span = Math.max(1e-6, stripB - stripA);
+    for(let x = 0; x < w; x += cellW){
+      const tc = x2t(x + cellW/2);
+      const idx = clamp(Math.round((tc - stripA)/span*(stripN-1)), 0, stripN-1);
+      sctx.drawImage(stripImg, idx*cellSrcW, 0, cellSrcW, stripImg.naturalHeight,
+                     x, 0, cellW, h);
+    }
+  }
+  const xs = clamp(t2x(ed.start),0,w), xe = clamp(t2x(ed.end),0,w);
+  sctx.fillStyle = "rgba(0,0,0,0.5)";
+  sctx.fillRect(0, 0, xs, h); sctx.fillRect(xe, 0, w - xe, h);
+  if(ed.pos>=view.a && ed.pos<=view.b){ sctx.fillStyle=TEXT_COLOR; sctx.fillRect(t2x(ed.pos),0,1,h); }
+}
+
+function drawWave(){
+  const w = W(), h = waveCanvas.clientHeight, mid = h/2;
+  wctx.clearRect(0, 0, w, h);
+  const peaks = ed.peaks, n = peaks.length;
+  if(n){
+    wctx.fillStyle = ACCENT;
+    for(let x=0; x<w; x+=2){
+      const t = x2t(x);
+      const p = peaks[clamp(Math.floor(t/ed.duration*n),0,n-1)] || 0;
+      const bh = Math.max(1, p * (h*0.88));
+      wctx.fillRect(x, mid - bh/2, 1.4, bh);
+    }
+  }else{
+    wctx.fillStyle = LINE_COLOR; wctx.fillRect(0, mid-1, w, 2);
+  }
+  const xs = clamp(t2x(ed.start),0,w), xe = clamp(t2x(ed.end),0,w);
+  wctx.fillStyle = "rgba(0,0,0,0.55)";
+  wctx.fillRect(0, 0, xs, h); wctx.fillRect(xe, 0, w - xe, h);
+  if(ed.pos>=view.a && ed.pos<=view.b){ wctx.fillStyle=TEXT_COLOR; wctx.fillRect(t2x(ed.pos),0,1,h); }
+}
+
+function layoutHandles(){
+  const w = W();
+  const xs = t2x(ed.start), xe = t2x(ed.end);
+  const hl = $("handleL"), hr = $("handleR");
+  hl.style.left = clamp(xs,0,w) + "px"; hl.style.display = (xs<-8||xs>w+8)?"none":"block";
+  hr.style.left = clamp(xe,0,w) + "px"; hr.style.display = (xe<-8||xe>w+8)?"none":"block";
+}
+
+function draw(){ drawStrip(); drawWave(); layoutHandles(); }
+
+// Запрос полосы кадров под текущий видимый участок (с задержкой, чтобы не
+// дёргать на каждый щелчок колеса). Сервер кэширует результат на диске.
+function scheduleStrip(){
+  if(!ed || !ed.has_video || stripCanvas.classList.contains("hidden")) return;
+  clearTimeout(stripTimer);
+  stripTimer = setTimeout(requestStrip, 220);
+}
+function requestStrip(){
+  if(!ed || !ed.has_video) return;
+  const a = view.a, b = view.b, n = 80;
+  const img = new Image();
+  img.onload = ()=>{ stripImg = img; stripA = a; stripB = b; stripN = n; drawStrip(); };
+  img.src = `/trim/api/filmstrip/${encodeURIComponent(ed.job_id)}`
+          + `?a=${a.toFixed(2)}&b=${b.toFixed(2)}&n=${n}`;
+}
+
+function refresh(){
+  ed.start = clamp(ed.start, 0, ed.duration);
+  ed.end = clamp(ed.end, 0, ed.duration);
+  if(ed.end < ed.start + 0.05) ed.end = Math.min(ed.duration, ed.start + 0.05);
+  view.a = clamp(view.a, 0, ed.duration); view.b = clamp(view.b, view.a+1e-3, ed.duration);
+  draw();
+  $("tStart").value = fmtTimePos(ed.start);
+  $("tEnd").value = fmtTimePos(ed.end);
+  $("cornerStart").textContent = fmtTimePos(view.a);
+  $("cornerEnd").textContent = fmtTimePos(view.b);
+  $("selDur").textContent = "фрагмент: " + fmtTime(ed.end - ed.start, true);
+  const zoomed = (view.b-view.a) < ed.duration - 0.01;
+  $("zoomHint").textContent = zoomed
+    ? `${fmtTimePos(view.a)}–${fmtTimePos(view.b)} · 2× клик = весь`
+    : "колёсико — зум";
+}
+
+// поля таймингов
+function applyField(input, which){
+  const v = parseTime(input.value);
+  if(v == null){ refresh(); return; }
+  if(which === "start") ed.start = clamp(v, 0, ed.duration);
+  else ed.end = clamp(v, 0, ed.duration);
+  refresh();
+  previewFor(which);
+}
+$("tStart").addEventListener("change", ()=> applyField($("tStart"), "start"));
+$("tEnd").addEventListener("change", ()=> applyField($("tEnd"), "end"));
+[$("tStart"), $("tEnd")].forEach(inp=>
+  inp.addEventListener("keydown", e=>{ if(e.key==="Enter") inp.blur(); }));
+
+// стрелки: двойные = ±1с, одинарные = ±1 кадр (аудио — ±0.1с)
+function frameStep(){ return ed.fps>0 ? 1/ed.fps : 0.1; }
+function nudge(which, delta){
+  if(which === "start") ed.start = clamp(ed.start + delta, 0, ed.end - 0.05);
+  else ed.end = clamp(ed.end + delta, ed.start + 0.05, ed.duration);
+  refresh();
+  previewFor(which);
+}
+document.querySelectorAll(".nudge button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    if(!ed) return;
+    const which = btn.parentElement.dataset.which;
+    const step = btn.dataset.step === "sec" ? 1 : frameStep();
+    nudge(which, (parseInt(btn.dataset.dir,10)||1) * step);
+  });
+});
+
+// перетаскивание ручек
+let dragging = null;
+function startDrag(which){ return (e)=>{ e.preventDefault(); dragging = which; }; }
+$("handleL").addEventListener("mousedown", startDrag("start"));
+$("handleR").addEventListener("mousedown", startDrag("end"));
+$("handleL").addEventListener("touchstart", startDrag("start"), {passive:false});
+$("handleR").addEventListener("touchstart", startDrag("end"), {passive:false});
+
+function onMove(clientX){
+  const rect = waveCanvas.getBoundingClientRect();
+  let t = clamp(x2t(clientX - rect.left), 0, ed.duration);
+  if(dragging === "start") ed.start = Math.min(t, ed.end - 0.05);
+  else ed.end = Math.max(t, ed.start + 0.05);
+  refresh();
+}
+document.addEventListener("mousemove", e=>{ if(dragging) onMove(e.clientX); });
+document.addEventListener("touchmove", e=>{
+  if(dragging && e.touches[0]){ e.preventDefault(); onMove(e.touches[0].clientX); }
+}, {passive:false});
+
+// прослушать фрагмент после изменения границы (drag / стрелки / ввод)
+function previewFrom(t){
+  if(!ed || !player || !isFinite(player.duration)) return;
+  player.currentTime = clamp(t, 0, ed.duration);
+  stopAt = ed.end;
+  player.play().catch(()=>{});
+}
+function previewFor(which){
+  previewFrom(which === "start" ? ed.start : Math.max(ed.start, ed.end - 2));
+}
+function endDrag(){
+  if(dragging) previewFor(dragging);
+  dragging = null;
+}
+document.addEventListener("mouseup", endDrag);
+document.addEventListener("touchend", endDrag);
+
+// клик по волне = перемотка плеера
+waveCanvas.addEventListener("mousedown", e=>{
+  const rect = waveCanvas.getBoundingClientRect();
+  const t = clamp(x2t(e.clientX - rect.left), 0, ed.duration);
+  ed.pos = t;
+  if(player && isFinite(player.duration)) player.currentTime = t;
+  draw();
+});
+
+// зум колёсиком вокруг курсора
+function zoomAt(clientX, deltaY){
+  if(!ed) return;
+  const rect = waveCanvas.getBoundingClientRect();
+  const x = clamp(clientX - rect.left, 0, W());
+  const tc = x2t(x);
+  const minLen = Math.max(0.2, 4 * frameStep());
+  const factor = deltaY > 0 ? 1.25 : 0.8;
+  let len = clamp(vlen() * factor, minLen, ed.duration);
+  let a = tc - (x/W())*len, b = a + len;
+  if(a < 0){ b -= a; a = 0; }
+  if(b > ed.duration){ a -= (b - ed.duration); b = ed.duration; }
+  view.a = Math.max(0, a); view.b = Math.min(ed.duration, b);
+  refresh(); scheduleStrip();
+}
+[waveCanvas, stripCanvas].forEach(cv=>
+  cv.addEventListener("wheel", e=>{ e.preventDefault(); zoomAt(e.clientX, e.deltaY); }, {passive:false}));
+$("waveWrap").addEventListener("dblclick", ()=>{ if(ed){ view={a:0,b:ed.duration}; refresh(); scheduleStrip(); } });
+
+window.addEventListener("resize", ()=>{ if(ed){ fitCanvas(); refresh(); } });
+
+// ============ Плеер ============
+let stopAt = null;
+$("volume").addEventListener("input", e=>{ if(player) player.volume = (e.target.value||0)/100; });
+
+// Смена аудиодорожки: меняем звук предпросмотра (ремукс выбранной дорожки) и
+// пересчитываем волну под неё. На экспорт дорожка уже передаётся отдельно.
+$("audioTrack").addEventListener("change", ()=>{
+  if(!ed || !player) return;
+  const idx = parseInt($("audioTrack").value, 10) || 0;
+  const t = player.currentTime, wasPlaying = !player.paused;
+  player.addEventListener("loadedmetadata", ()=>{
+    try{ player.currentTime = t; }catch(e){}
+    if(wasPlaying) player.play().catch(()=>{});
+  }, {once:true});
+  player.src = "/trim/api/media/" + encodeURIComponent(ed.job_id) + "?a=" + idx;
+  player.load();
+  fetch("/trim/api/peaks/" + encodeURIComponent(ed.job_id) + "?a=" + idx)
+    .then(r=>r.json()).then(d=>{ if(d.peaks){ ed.peaks = d.peaks; draw(); } })
+    .catch(()=>{});
+});
+function togglePlay(){
+  if(!player) return;
+  if(player.paused){ stopAt = null; player.play().catch(()=>{}); }
+  else player.pause();
+}
+$("btnPlay").addEventListener("click", togglePlay);
+
+// Пробел — play/pause (когда открыт редактор и фокус не на поле/кнопке).
+document.addEventListener("keydown", e=>{
+  if(e.code !== "Space" && e.key !== " ") return;
+  if(!ed || !player || $("editor").classList.contains("hidden")) return;
+  const tag = (document.activeElement && document.activeElement.tagName) || "";
+  if(["INPUT","SELECT","TEXTAREA","BUTTON"].includes(tag)) return;
+  e.preventDefault();
+  togglePlay();
+});
+$("btnPlaySel").addEventListener("click", ()=>{
+  if(!player) return;
+  player.currentTime = ed.start; stopAt = ed.end; player.play().catch(()=>{});
+});
+function attachPlayerEvents(){
+  if(player._wired) return;
+  player._wired = true;
+  player.addEventListener("timeupdate", ()=>{
+    ed.pos = player.currentTime;
+    if(stopAt != null && ed.pos >= stopAt){ player.pause(); stopAt = null; }
+    drawStrip(); drawWave();
+  });
+  player.addEventListener("play", ()=>{ $("btnPlay").textContent = "⏸"; });
+  player.addEventListener("pause", ()=>{ $("btnPlay").textContent = "▶"; });
+  player.addEventListener("ended", ()=>{ $("btnPlay").textContent = "▶"; });
+}
+
+// ============ Выход и формат ============
+// Предпочтение из настроек (расширение аудио-файла) — как умолчание для
+// формата вывода, только если оно реально входит в AUDIO_FMTS (см. пояснение
+// у PREF_VIDEO_EXT/PREF_AUDIO_EXT в youtube.html — тот же паттерн).
+const PREF_AUDIO_EXT = {{ settings.audio_ext|tojson }};
+
+async function loadFormats(){
+  try{
+    const d = await (await fetch("/trim/api/formats")).json();
+    AUDIO_FMTS = d.audio || [];
+  }catch(e){
+    AUDIO_FMTS = [{key:"mp3",label:"MP3"},{key:"m4a",label:"M4A / AAC"},
+                  {key:"wav",label:"WAV (без потерь)"},{key:"opus",label:"Opus"}];
+  }
+}
+loadFormats();
+
+function fillFormat(mode){
+  const sel = $("outFmt"); sel.innerHTML = "";
+  if(mode === "video"){
+    const o = document.createElement("option");
+    o.value = "mp4"; o.textContent = "MP4 (видео)"; sel.appendChild(o); sel.disabled = true;
+  }else{
+    sel.disabled = false;
+    const def = AUDIO_FMTS.some(f=>f.key===PREF_AUDIO_EXT) ? PREF_AUDIO_EXT : "mp3";
+    AUDIO_FMTS.forEach(f=>{
+      const o = document.createElement("option");
+      o.value = f.key; o.textContent = f.label;
+      if(f.key === def) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+}
+function setOutMode(mode){
+  ed && (ed.out_mode = mode);
+  document.querySelectorAll("#outModeSeg button").forEach(b=>
+    b.classList.toggle("active", b.dataset.mode === mode));
+  fillFormat(mode);
+  // Блок «сжать» — только для видео.
+  $("compressWrap").classList.toggle("hidden", mode !== "video");
+  updateTrimBtn();
+}
+document.querySelectorAll("#outModeSeg button").forEach(b=>
+  b.addEventListener("click", ()=> setOutMode(b.dataset.mode)));
+
+// Чекбокс «сжать»: показывает меню сжатия и меняет надпись кнопки.
+function updateTrimBtn(){
+  const c = ed && ed.out_mode === "video" && $("compressToggle").checked;
+  $("btnTrim").innerHTML = ICONS.scissors + (c ? " сжать + обрезать" : " обрезать");
+}
+$("compressToggle").addEventListener("change", ()=>{
+  $("compressMenu").classList.toggle("hidden", !$("compressToggle").checked);
+  updateTrimBtn();
+});
+document.querySelectorAll("#compressMenu .presets button").forEach(b=>
+  b.addEventListener("click", ()=>{ $("targetMb").value = b.dataset.mb; }));
+
+$("btnTrim").addEventListener("click", async ()=>{
+  if(!ed) return;
+  const mode = ed.out_mode || (ed.has_video ? "video" : "audio");
+  const compress = mode === "video" && $("compressToggle").checked;
+  const payload = {job_id: ed.job_id, start: ed.start, end: ed.end,
+                   mode, format: mode === "video" ? "mp4" : ($("outFmt").value || "mp3"),
+                   audio: parseInt($("audioTrack").value, 10) || 0,
+                   compress,
+                   target_mb: parseFloat($("targetMb").value) || 0,
+                   resolution: parseInt($("resolution").value, 10) || 0,
+                   audio_kbps: parseInt($("audioKbps").value, 10) || 128};
+  const b = $("btnTrim"); b.disabled = true; b.textContent = "Запускаю…";
+  try{
+    const res = await fetch("/trim/api/start", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
+    });
+    const d = await res.json();
+    if(!res.ok){
+      if(d.need_install){ openInstallModal(d.missing_deps); return; }
+      throw new Error(d.error || "Не удалось запустить");
+    }
+    $("progressCard").classList.remove("hidden");
+    $("btnGetFile").classList.add("hidden");
+    autoSaved = null;
+    setMsg($("progMsg"), "", "");
+    startTrimPoll(ed.job_id);
+  }catch(e){
+    $("progressCard").classList.remove("hidden");
+    setMsg($("progMsg"), e.message, "err");
+  }finally{ b.disabled = false; updateTrimBtn(); }
+});
+
+function startTrimPoll(id){
+  stopTrimPoll();
+  trimTimer = setInterval(()=> trimOnce(id), 700);
+  trimOnce(id);
+}
+function stopTrimPoll(){ if(trimTimer){ clearInterval(trimTimer); trimTimer = null; } }
+
+async function trimOnce(id){
+  try{
+    const res = await fetch("/api/status/" + id);
+    const s = await res.json();
+    const pct = Math.max(0, Math.min(100, s.progress||0));
+    $("barFill").style.width = pct + "%";
+    $("progPct").textContent = (Math.round(pct*10)/10) + "%";
+    $("progStage").textContent = s.stage || "";
+    const titles = {pending:"подготовка…", processing:"нарезка…",
+                    done:"готово!", error:"ошибка", canceled:"отменено"};
+    $("progTitle").textContent = titles[s.status] || s.status;
+    if(s.status === "done"){
+      stopTrimPoll();
+      $("barFill").style.width = "100%";
+      const a = $("btnGetFile");
+      a.href = "/trim/api/result/" + encodeURIComponent(id);
+      a.classList.remove("hidden");
+      const sz = s.result_size_mb != null ? ` (${s.result_size_mb} МБ)` : "";
+      setMsg($("progMsg"), "Фрагмент готов" + sz + " — браузер сохраняет его автоматически.", "ok");
+      if(autoSaved !== id){ autoSaved = id; triggerSave(a.href); }
+    }else if(s.status === "error"){
+      stopTrimPoll(); setMsg($("progMsg"), s.error || "Ошибка нарезки.", "err");
+    }else if(s.status === "canceled"){
+      stopTrimPoll(); setMsg($("progMsg"), "Нарезка отменена.", "err");
+    }
+  }catch(e){}
+}
+
+function triggerSave(url){
+  let frame = document.getElementById("saveFrame");
+  if(!frame){
+    frame = document.createElement("iframe");
+    frame.id = "saveFrame"; frame.style.display = "none";
+    document.body.appendChild(frame);
+  }
+  frame.src = url;
+}
+
+$("btnCancel").addEventListener("click", async ()=>{
+  if(!ed) return;
+  try{ await fetch("/api/cancel/" + ed.job_id, {method:"POST"}); }catch(e){}
+  stopTrimPoll();
+  $("progTitle").textContent = "отменено";
+});
+</script>
+{% endblock %}

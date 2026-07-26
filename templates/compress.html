@@ -1,0 +1,307 @@
+{% extends "_base.html" %}
+{% block title %}Сжать видео — jade.tools{% endblock %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>сжать</h1>
+    <p>уменьшить видео до нужного размера в МБ — двухпроходное кодирование (точный размер)</p>
+  </div>
+
+  <!-- Источник -->
+  <div class="card" id="sourceCard">
+    <div class="drop" id="drop">
+      <div class="big">перетащите видео сюда или нажмите, чтобы выбрать</div>
+      <div class="small">mp4, mkv, webm, mov и другие форматы</div>
+    </div>
+    <input id="fileInput" type="file" accept="video/*" class="hidden">
+
+    <div class="or">или</div>
+
+    <label for="url">ссылка на видео (youtube и другие сайты)</label>
+    <div class="url-row">
+      <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+      <button id="btnFetch">получить</button>
+    </div>
+    <p class="hint">подойдёт ссылка с любого сайта, который поддерживает <code>yt-dlp</code>
+      (TikTok, Instagram, Vimeo и т.д.), не только YouTube.</p>
+    <div id="srcMsg"></div>
+  </div>
+
+  <!-- Настройки -->
+  <div class="card hidden" id="settings">
+    <div class="preview" id="srcInfo"></div>
+
+    <div style="height:16px"></div>
+    <div class="grid grid3">
+      <div>
+        <label>целевой размер, МБ</label>
+        <input id="targetMb" type="number" min="0" step="1" value="{{ settings.compress_target_mb or 25 }}">
+        <div class="presets">
+          <button class="ghost" data-mb="0" title="без ограничения размера — только разрешение и звук">0</button>
+          <button class="ghost" data-mb="10">10</button>
+          <button class="ghost" data-mb="15">15</button>
+          <button class="ghost" data-mb="25">25</button>
+          <button class="ghost" data-mb="50">50</button>
+          <button class="ghost" data-mb="100">100</button>
+        </div>
+      </div>
+      <div>
+        <label>разрешение</label>
+        <select id="resolution">
+          <option value="0" selected>исходное</option>
+          <option value="2160">2160p (4K)</option>
+          <option value="1440">1440p</option>
+          <option value="1080">1080p</option>
+          <option value="720">720p</option>
+          <option value="480">480p</option>
+          <option value="360">360p</option>
+          <option value="240">240p</option>
+          <option value="144">144p</option>
+        </select>
+      </div>
+      <div>
+        <label>битрейт звука</label>
+        <select id="audioKbps">
+          <option value="96" {% if settings.compress_audio_kbps == 96 %}selected{% endif %}>96 kbps</option>
+          <option value="128" {% if settings.compress_audio_kbps == 128 %}selected{% endif %}>128 kbps</option>
+          <option value="192" {% if settings.compress_audio_kbps == 192 or not settings.compress_audio_kbps %}selected{% endif %}>192 kbps</option>
+          <option value="256" {% if settings.compress_audio_kbps == 256 %}selected{% endif %}>256 kbps</option>
+        </select>
+      </div>
+      <p class="hint" style="grid-column:1/-1;margin:0">0 в целевом размере — без сжатия под размер:
+        видео пережимается только по выбранным разрешению и битрейту звука, размер файла не ограничивается.</p>
+    </div>
+
+    <div style="height:16px"></div>
+    <button id="btnCompress" style="width:100%"><span data-icon="shrink"></span> сжать</button>
+  </div>
+
+  <!-- Прогресс -->
+  <div class="card hidden" id="progressCard">
+    <label id="progTitle">обработка…</label>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="prog-line">
+      <span id="progPct">0%</span>
+      <span id="progStage"></span>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px">
+      <button id="btnCancel" class="ghost">отменить</button>
+      <a id="btnGetFile" class="hidden" href="#" style="text-decoration:none">
+        <button style="width:100%"><span data-icon="save"></span> сохранить файл</button>
+      </a>
+    </div>
+    <div id="progMsg"></div>
+  </div>
+
+  <footer>исходник скачивается/обрабатывается локально. для ссылок оригинал сначала загружается, затем сжимается.</footer>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+let job = null;          // {job_id, duration, title}
+let pollTimer = null;
+let autoSaved = null;
+
+function setMsg(el, t, type){ el.innerHTML = t ? `<div class="msg ${type}">${escapeHtml(t)}</div>` : ""; }
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, c => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+  ));
+}
+function fmtTime(s){
+  s = Math.floor(s||0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  const mm = String(m).padStart(2,"0"), ss = String(sec).padStart(2,"0");
+  return h>0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+// ---- Drag & drop / выбор файла ----
+const drop = $("drop"), fileInput = $("fileInput");
+drop.addEventListener("click", ()=> fileInput.click());
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev, e=>{
+  e.preventDefault(); drop.classList.add("over");
+}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev, e=>{
+  e.preventDefault(); drop.classList.remove("over");
+}));
+drop.addEventListener("drop", e=>{
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f) uploadFile(f);
+});
+fileInput.addEventListener("change", ()=>{
+  const f = fileInput.files && fileInput.files[0];
+  if(f) uploadFile(f);
+});
+
+async function uploadFile(file){
+  drop.querySelector(".big").textContent = file.name;
+  setMsg($("srcMsg"), "Загрузка файла…", "ok");
+  const fd = new FormData();
+  fd.append("file", file);
+  try{
+    const res = await fetch("/compress/api/upload", {method:"POST", body:fd});
+    const d = await res.json();
+    if(!res.ok){
+      if(d.need_install){ openInstallModal(d.missing_deps); return; }
+      throw new Error(d.error || "Ошибка загрузки");
+    }
+    job = {job_id:d.job_id, duration:d.duration, title:d.title};
+    showSettings(d.title, d.duration, d.size_mb, d.src_height);
+    setMsg($("srcMsg"), "", "");
+  }catch(e){ setMsg($("srcMsg"), e.message, "err"); }
+}
+
+$("btnFetch").addEventListener("click", async ()=>{
+  const url = $("url").value.trim();
+  if(!url){ setMsg($("srcMsg"), "Вставьте ссылку на видео.", "err"); return; }
+  const b = $("btnFetch"); b.disabled = true; b.textContent = "Получаю…";
+  try{
+    const res = await fetch("/compress/api/fetch", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({url})
+    });
+    const d = await res.json();
+    if(!res.ok) throw new Error(d.error || "Ошибка");
+    job = {job_id:d.job_id, duration:d.duration, title:d.title};
+    showSettings(d.title, d.duration, null, d.src_height);
+    setMsg($("srcMsg"), "", "");
+  }catch(e){ setMsg($("srcMsg"), e.message, "err"); }
+  finally{ b.disabled = false; b.textContent = "получить"; }
+});
+$("url").addEventListener("keydown", e=>{ if(e.key === "Enter") $("btnFetch").click(); });
+
+const RES_STEPS = [2160, 1440, 1080, 720, 480, 360, 240, 144];
+
+function buildResolutionOptions(srcHeight){
+  const sel = $("resolution");
+  sel.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "0"; auto.textContent = "исходное"; auto.selected = true;
+  sel.appendChild(auto);
+  RES_STEPS.forEach(h=>{
+    // Только понижение: скрываем варианты >= исходного разрешения.
+    if(srcHeight && h >= srcHeight) return;
+    const o = document.createElement("option");
+    o.value = String(h);
+    o.textContent = h + "p" + (h === 2160 ? " (4K)" : "");
+    sel.appendChild(o);
+  });
+}
+
+function showSettings(title, duration, sizeMb, srcHeight){
+  let html = `<div class="meta"><h3>${escapeHtml(title)}</h3>`;
+  const sub = [];
+  if(duration) sub.push(ICONS.timer + " " + fmtTime(duration));
+  if(srcHeight) sub.push(ICONS.monitor + " " + srcHeight + "p");
+  if(sizeMb != null) sub.push(ICONS.package + " " + sizeMb + " МБ");
+  if(sub.length) html += `<div class="sub">${sub.join("  ·  ")}</div>`;
+  html += `</div>`;
+  $("srcInfo").innerHTML = html;
+  buildResolutionOptions(srcHeight);
+  $("settings").classList.remove("hidden");
+  $("progressCard").classList.add("hidden");
+}
+
+document.querySelectorAll(".presets button").forEach(b=>{
+  b.addEventListener("click", ()=>{ $("targetMb").value = b.dataset.mb; });
+});
+
+$("btnCompress").addEventListener("click", async ()=>{
+  if(!job) return;
+  const target_mb = parseFloat($("targetMb").value);
+  if(isNaN(target_mb) || target_mb < 0){
+    $("progressCard").classList.remove("hidden");
+    setMsg($("progMsg"), "Укажите целевой размер в МБ (0 — без ограничения размера).", "err");
+    return;
+  }
+  const payload = {
+    job_id: job.job_id,
+    target_mb,
+    audio_kbps: parseInt($("audioKbps").value, 10) || 128,
+    height: parseInt($("resolution").value, 10) || 0,
+  };
+  const b = $("btnCompress"); b.disabled = true; b.textContent = "Запускаю…";
+  try{
+    const res = await fetch("/compress/api/start", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    const d = await res.json();
+    if(!res.ok){
+      if(d.need_install){ openInstallModal(d.missing_deps); return; }
+      throw new Error(d.error || "Не удалось запустить");
+    }
+    $("progressCard").classList.remove("hidden");
+    $("btnGetFile").classList.add("hidden");
+    setMsg($("progMsg"), "", "");
+    startPolling(job.job_id);
+  }catch(e){
+    $("progressCard").classList.remove("hidden");
+    setMsg($("progMsg"), e.message, "err");
+  }finally{
+    b.disabled = false; b.innerHTML = ICONS.shrink + " сжать";
+  }
+});
+
+function startPolling(id){ stopPolling(); pollTimer = setInterval(()=> pollOnce(id), 800); pollOnce(id); }
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
+
+async function pollOnce(id){
+  try{
+    const res = await fetch("/api/status/" + id);
+    const s = await res.json();
+    update(s);
+    if(["done","error","canceled"].includes(s.status)) stopPolling();
+  }catch(e){}
+}
+
+function update(s){
+  const pct = Math.max(0, Math.min(100, s.progress||0));
+  $("barFill").style.width = pct + "%";
+  $("progPct").textContent = (Math.round(pct*10)/10) + "%";
+  $("progStage").textContent = s.stage || "";
+  const titles = {
+    pending:"подготовка…", downloading:"скачивание…", processing:"сжатие…",
+    done:"готово!", error:"ошибка", canceled:"отменено"
+  };
+  $("progTitle").textContent = titles[s.status] || s.status;
+  if(s.status === "done"){
+    $("barFill").style.width = "100%";
+    const a = $("btnGetFile");
+    a.href = "/api/file/" + encodeURIComponent(job.job_id);
+    a.classList.remove("hidden");
+    const sz = s.result_size_mb != null ? ` (${s.result_size_mb} МБ)` : "";
+    setMsg($("progMsg"), "Файл готов" + sz + " — браузер сохраняет его автоматически.", "ok");
+    if(autoSaved !== job.job_id){
+      autoSaved = job.job_id;
+      triggerSave("/api/file/" + encodeURIComponent(job.job_id));
+    }
+  }else if(s.status === "error"){
+    setMsg($("progMsg"), s.error || "Ошибка обработки.", "err");
+  }else if(s.status === "canceled"){
+    setMsg($("progMsg"), "Обработка отменена.", "err");
+  }else{
+    setMsg($("progMsg"), "", "");
+  }
+}
+
+function triggerSave(url){
+  let frame = document.getElementById("saveFrame");
+  if(!frame){
+    frame = document.createElement("iframe");
+    frame.id = "saveFrame"; frame.style.display = "none";
+    document.body.appendChild(frame);
+  }
+  frame.src = url;
+}
+
+$("btnCancel").addEventListener("click", async ()=>{
+  if(!job) return;
+  try{ await fetch("/api/cancel/" + job.job_id, {method:"POST"}); }catch(e){}
+  stopPolling();
+  $("progTitle").textContent = "отменено";
+});
+</script>
+{% endblock %}

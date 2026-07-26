@@ -1,0 +1,763 @@
+{% extends "_base.html" %}
+{% block title %}Настройки — jade.tools{% endblock %}
+{% block head %}
+<style>
+  .wrap{max-width:720px}
+  .sec-title{font-size:13px;font-weight:600;text-transform:lowercase;letter-spacing:.4px;
+             margin:0 0 16px;color:var(--text)}
+  .field{margin-bottom:16px}
+  .field:last-child{margin-bottom:0}
+  .row2{display:flex;gap:8px;align-items:flex-start}
+  .row2 .grow{flex:1;min-width:0}
+  .hintmuted{color:var(--muted);font-size:11px;margin-top:6px}
+  .err{color:var(--error);font-size:11px;margin-top:6px;min-height:0}
+  .browse{flex:0 0 auto;padding:14px 14px}
+  /* Строка пути temp/cache (этап 4): дропдаун 2/8 · поле пути 4/8 · кнопка 2/8. */
+  .path-row{display:grid;grid-template-columns:2fr 4fr 2fr;gap:8px}
+  .path-row input[readonly]{color:var(--muted);cursor:default}
+  @media (max-width:620px){.path-row{grid-template-columns:1fr}}
+  /* Пульсация недоступного пути — держится, пока путь невалиден; замирает
+     под курсором (не мельтешит, пока юзер работает со строкой); гаснет
+     насовсем, когда путь снова доступен (класс снимается в JS, не CSS). */
+  @keyframes pathPulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(var(--error-rgb),0)}
+    50%{box-shadow:0 0 0 4px rgba(var(--error-rgb),.28)}
+  }
+  .path-row.path-invalid{border-radius:var(--radius-sm);animation:pathPulse 1.6s ease-in-out infinite}
+  .path-row.path-invalid:hover{animation-play-state:paused}
+  .chk-row{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:12px;
+           color:var(--text);text-transform:lowercase;letter-spacing:.3px;font-weight:500;
+           margin-bottom:10px}
+  .chk-row input{width:17px;height:17px;accent-color:var(--accent);cursor:pointer;margin:0}
+  input:disabled,select:disabled{opacity:.45;cursor:not-allowed}
+  /* Раздел очистки */
+  .clear-row{display:flex;align-items:center;gap:14px;padding:14px 0;border-top:1px solid var(--line)}
+  .clear-row:first-of-type{border-top:0}
+  .clear-row .info{flex:1;min-width:0}
+  .clear-row .info b{font-weight:600;font-size:13px;text-transform:lowercase}
+  .clear-row .meta{color:var(--muted);font-size:11px;margin-top:4px;line-height:1.6}
+  .clear-row button{flex:0 0 auto}
+  /* Низ страницы */
+  .danger{background:transparent;border:1px solid rgba(var(--error-rgb),.35);color:var(--error-strong)}
+  .danger:hover{background:rgba(var(--error-rgb),.08);opacity:1}
+  .version{color:var(--muted);font-size:11px;text-align:center;margin-top:18px}
+  /* .modal-bg/.modal — общий паттерн модалки, стили в _base.html. */
+  /* Центр области контента (без сайдбара), а не всего окна — иначе на широких
+     экранах бейдж съезжает влево от видимого содержимого. */
+  .saved-flash{position:fixed;bottom:18px;
+               left:calc(var(--rail-w,88px) + (100vw - var(--rail-w,88px))/2);
+               transform:translateX(-50%);
+               background:var(--surface-2);border:1px solid var(--accent-dim);color:var(--accent);
+               padding:8px 16px;border-radius:99px;font-size:12px;opacity:0;pointer-events:none;
+               transition:opacity .2s;z-index:60}
+  .saved-flash.show{opacity:1}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>настройки</h1>
+    <p>изменения сохраняются автоматически</p>
+  </div>
+
+  <!-- Раздел 1 — предпочтения скачивания -->
+  <div class="card">
+    <div class="sec-title">предпочтения скачивания</div>
+
+    <div class="grid">
+      <div class="field">
+        <label>расширение видео-файла</label>
+        <select data-key="video_ext">
+          <option value="original">оригинал</option>
+          <option value="mp4">MP4</option>
+          <option value="mov">MOV</option>
+          <option value="webm">WEBM</option>
+          <option value="mkv">MKV</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>расширение аудио-файла</label>
+        <select data-key="audio_ext">
+          <option value="mp3">MP3</option>
+          <option value="wav">WAV</option>
+          <option value="aac">AAC</option>
+          <option value="opus">Opus</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="chk-row"><input type="checkbox" data-key="embed_metadata" id="embed_metadata"> встраивать обложку и метаданные</label>
+      <div class="hintmuted">для видео (MP4/MKV) — только метаданные (название, канал); для звука
+        MP3/M4A — метаданные и обложка, для Opus — по возможности; для WAV не
+        применяется — формат не поддерживает встраивание.</div>
+    </div>
+
+    <div class="grid" style="margin-bottom:16px">
+      <div class="field">
+        <label>битрейт аудио при сжатии</label>
+        <select data-key="compress_audio_kbps">
+          <option value="128">128 кбит/с</option>
+          <option value="192">192 кбит/с</option>
+          <option value="256">256 кбит/с</option>
+          <option value="320">320 кбит/с</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>целевой размер сжатия по умолчанию, МБ</label>
+        <input type="number" min="1" step="1" data-key="compress_target_mb" placeholder="не задано">
+        <div class="hintmuted">пусто — сжатие до размера не применяется (обычная логика).</div>
+      </div>
+    </div>
+
+    <div class="field" style="margin-bottom:16px">
+      <label>длина фрагмента по умолчанию для ссылки с таймкодом, сек</label>
+      <input type="number" min="1" step="1" data-key="default_clip_length_for_timestamp_link" placeholder="не задано">
+      <div class="hintmuted">только для «нарезать»: если в ссылке распознан YouTube-таймкод (<code>?t=</code>,
+        <code>&amp;start=</code>, <code>#t=</code>), маркер конца фрагмента ставится на это число секунд
+        позже маркера начала. пусто — маркер конца на всей длительности видео, как обычно.</div>
+    </div>
+
+    <div class="grid">
+      <div class="field">
+        <label>ограничение скорости скачивания</label>
+        <div class="row2">
+          <input type="number" min="0" step="1" data-key="rate_limit_value" placeholder="без ограничения" style="flex:2;min-width:0">
+          <select data-key="rate_limit_unit" style="flex:1;width:auto">
+            <option value="KB">КБ/с</option>
+            <option value="MB">МБ/с</option>
+            <option value="Kbit">КБит/с</option>
+            <option value="Mbit">МБит/с</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>лимит одновременных загрузок (плейлист)</label>
+        <select data-key="max_concurrent_downloads" id="max_concurrent_downloads">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3 (рекомендовано)</option>
+          <option value="5">5</option>
+          <option value="unlimited">без ограничений</option>
+        </select>
+        <div class="hintmuted">Отключение лимита и большое количество одновременных загрузок
+          может привести к временной блокировке IP или самого YouTube-аккаунта, куки которого
+          используются для авторизации. Действуете на свой страх и риск.</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>тема</label>
+      <select data-key="theme" id="theme">
+        <option value="dark">тёмная</option>
+        <option value="light">светлая</option>
+      </select>
+      <div class="hintmuted">применяется сразу и на всех страницах, без перезагрузки.</div>
+    </div>
+  </div>
+
+  <!-- Раздел 2 — пути -->
+  <div class="card">
+    <div class="sec-title">пути</div>
+
+    <div class="field">
+      <label>папка временных файлов</label>
+      <div class="path-row" id="temp_row">
+        <select id="temp_mode">
+          <option value="app">в папке приложения</option>
+          <option value="system">в системе</option>
+          <option value="custom">свой путь</option>
+        </select>
+        <input class="grow" type="text" id="temp_path_display" placeholder="" readonly>
+        <button class="ghost" id="temp_path_btn">открыть</button>
+      </div>
+      <div class="err" data-err="temp_custom_path" id="temp_err"></div>
+    </div>
+
+    <div class="field">
+      <label>папка кэша</label>
+      <div class="path-row" id="cache_row">
+        <select id="cache_mode">
+          <option value="app">в папке приложения</option>
+          <option value="system">в системе</option>
+          <option value="custom">свой путь</option>
+        </select>
+        <input class="grow" type="text" id="cache_path_display" placeholder="" readonly>
+        <button class="ghost" id="cache_path_btn">открыть</button>
+      </div>
+      <div class="err" data-err="cache_custom_path" id="cache_err"></div>
+    </div>
+
+    <div class="field">
+      <label class="chk-row"><input type="checkbox" data-key="use_cookies" id="use_cookies"> использовать cookies</label>
+      <div class="hintmuted">нужно для приватных/ограниченных по возрасту видео и чтобы YouTube
+        не требовал подтвердить, что вы не бот. по умолчанию выключено.</div>
+    </div>
+
+    <!-- Главный тумблер выкл → весь блок ниже скрыт целиком (см. refreshToggles). -->
+    <div id="cookiesBlock" class="hidden">
+      <div class="field" style="margin-bottom:6px">
+        <label class="chk-row"><input type="checkbox" data-key="cookies_from_browser" id="cookies_from_browser"> подтягивать автоматически из браузера</label>
+      </div>
+
+      <!-- состояние 2: авто из браузера (только Gecko — см. пояснение) -->
+      <div id="cookies_browser_row" class="field">
+        <label style="margin-bottom:6px">браузер</label>
+        <select data-key="cookies_browser" id="cookies_browser">
+          <option value="firefox">Firefox (рекомендуется)</option>
+          <option value="librewolf">LibreWolf</option>
+          <option value="waterfox">Waterfox</option>
+          <option value="zen">Zen</option>
+        </select>
+        <div class="hintmuted">Автоматическая подтяжка cookies работает только с Firefox и его
+          форками (LibreWolf, Waterfox, Zen). Chrome, Edge, Opera, Opera GX, Brave, Yandex и другие
+          браузеры на Chromium с 2024 года шифруют cookies так, что доступ к ним имеет только
+          сам браузер — внешние программы их прочитать не могут. Если пользуетесь браузером на
+          Chromium — отключите автоматическую подтяжку и передайте файл cookies.txt вручную
+          (см. инструкцию ниже).</div>
+      </div>
+
+      <!-- состояние 3: свой файл (любой браузер — экспорт делает пользователь) -->
+      <div id="cookies_file_row" class="field hidden">
+        <label style="margin-bottom:6px">файл cookies.txt</label>
+        <div class="row2">
+          <input class="grow" type="text" data-key="cookies_file_path" id="cookies_file_path" placeholder="путь к cookies.txt (формат Netscape)">
+          <button class="ghost browse" data-pick="file" data-target="cookies_file_path">обзор…</button>
+        </div>
+        <div class="err" data-err="cookies_file_path"></div>
+        <div class="hintmuted" id="cookies_file_age"></div>
+
+        <button type="button" class="ghost" id="btnCookieHelp" style="margin-top:10px">как экспортировать cookies.txt?</button>
+        <div id="cookieHelp" class="hintmuted hidden" style="margin-top:10px;line-height:1.7">
+          <b style="color:var(--text)">как экспортировать cookies.txt</b><br>
+          программа не может сама достать cookies из браузера — их шифрует сам браузер в целях
+          безопасности. экспортировать нужно расширением, работающим внутри браузера:
+          <ol style="margin:8px 0 8px 20px;padding:0">
+            <li>установите «Get cookies.txt LOCALLY» (Chrome/Edge/Opera/Brave — Chrome Web Store; Firefox — Firefox Add-ons)</li>
+            <li>откройте youtube.com и войдите в аккаунт</li>
+            <li>иконка расширения → Export (формат Netscape)</li>
+            <li>сохраните cookies.txt и укажите путь в поле выше</li>
+          </ol>
+          файл содержит вашу активную сессию YouTube — не передавайте его никому.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Раздел 3 — файлы -->
+  <div class="card">
+    <div class="sec-title">файлы</div>
+    <div class="clear-row">
+      <div class="info"><b>кэш</b><div class="meta" id="meta_cache">—</div></div>
+      <button class="ghost" data-clear="cache">очистить</button>
+    </div>
+    <div class="clear-row">
+      <div class="info"><b>временные файлы</b><div class="meta" id="meta_temp">—</div></div>
+      <button class="ghost" data-clear="temp">очистить</button>
+    </div>
+    <div class="clear-row">
+      <div class="info"><b>куки</b><div class="meta" id="meta_cookies">—</div></div>
+      <button class="ghost" id="btnRevealCookies">показать</button>
+    </div>
+  </div>
+
+  <!-- Раздел 4 — журнал -->
+  <div class="card">
+    <div class="sec-title">журнал</div>
+    <div class="clear-row">
+      <div class="info"><b>лог работы приложения</b><div class="meta" id="meta_log">—</div></div>
+      <button class="ghost" id="btnRevealLog">показать файл логов</button>
+    </div>
+  </div>
+
+  <!-- Раздел 5 — зависимости: расположение (bin/ или система) + обновление
+       (yt-dlp) / переустановка (ffmpeg, Deno — окно установки, этап 2). -->
+  <div class="card">
+    <div class="sec-title">зависимости</div>
+    <div class="clear-row">
+      <div class="info"><b>yt-dlp</b><div class="meta" id="meta_ytdlp">—</div></div>
+      <button class="ghost" id="btnCheckYtdlp">проверить обновление</button>
+    </div>
+    <div class="clear-row">
+      <div class="info"><b>ffmpeg / ffprobe</b><div class="meta" id="meta_ffmpeg">—</div></div>
+      <button class="ghost" id="btnReinstallFfmpeg">переустановить</button>
+    </div>
+    <div class="clear-row">
+      <div class="info"><b>Deno</b><div class="meta" id="meta_deno">—</div></div>
+      <button class="ghost" id="btnReinstallDeno">переустановить</button>
+    </div>
+  </div>
+
+  <button class="danger" id="btnReset" style="width:100%">сбросить настройки</button>
+  <div class="version" id="version">текущая версия: …</div>
+</div>
+
+<!-- Универсальная модалка подтверждения (заголовок/текст/кнопки задаются
+     параметрами из JS — см. showConfirm(); используется и для сброса
+     настроек, и для отключения лимита одновременных загрузок). -->
+<div class="modal-bg" id="confirmModal">
+  <div class="modal">
+    <h3 id="confirmTitle"></h3>
+    <p id="confirmText"></p>
+    <div class="actions">
+      <button class="ghost" id="confirmCancelBtn">отмена</button>
+      <button class="danger" id="confirmOkBtn">подтвердить</button>
+    </div>
+  </div>
+</div>
+<div class="saved-flash" id="savedFlash">сохранено</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const qa = (s) => Array.from(document.querySelectorAll(s));
+let concurPrevValue = "3";   // последнее подтверждённое значение лимита загрузок
+const PATH_STATE = {temp: null, cache: null};   // последний известный paths.* с сервера
+
+// ---- Универсальная модалка подтверждения ----
+// Заголовок/текст/подписи кнопок задаются параметрами — НЕ переиспользуется
+// как copy-paste вёрстка под конкретный сценарий (см. #confirmModal выше).
+function showConfirm({title, text, okText = "подтвердить", cancelText = "отмена",
+                      onConfirm, onCancel}){
+  const modal = $("confirmModal"), okBtn = $("confirmOkBtn"), cancelBtn = $("confirmCancelBtn");
+  $("confirmTitle").textContent = title;
+  $("confirmText").textContent = text;
+  okBtn.textContent = okText;
+  cancelBtn.textContent = cancelText;
+
+  function cleanup(){
+    modal.classList.remove("show");
+    okBtn.removeEventListener("click", onOk);
+    cancelBtn.removeEventListener("click", onCancelClick);
+    modal.removeEventListener("click", onBg);
+  }
+  function onOk(){ cleanup(); if(onConfirm) onConfirm(); }
+  function onCancelClick(){ cleanup(); if(onCancel) onCancel(); }
+  function onBg(e){ if(e.target === modal){ cleanup(); if(onCancel) onCancel(); } }
+
+  okBtn.addEventListener("click", onOk);
+  cancelBtn.addEventListener("click", onCancelClick);
+  modal.addEventListener("click", onBg);
+  modal.classList.add("show");
+}
+
+function flash(){ const f=$("savedFlash"); f.classList.add("show"); clearTimeout(f._t);
+  f._t=setTimeout(()=>f.classList.remove("show"), 900); }
+function fmtSize(b){ if(!b) return "0 Б"; const u=["Б","КБ","МБ","ГБ","ТБ"];
+  let i=0,v=b; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(i?1:0)+" "+u[i]; }
+function fmtDate(ts){ if(!ts) return "—"; const d=new Date(ts*1000);
+  return d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
+
+// ---- Загрузка состояния ----
+async function loadState(){
+  const st = await (await fetch("/settings/api/state")).json();
+  applyState(st);
+}
+function applyState(st){
+  const s = st.settings;
+  qa("[data-key]").forEach(el=>{
+    const k = el.dataset.key;
+    if(!(k in s)) return;
+    if(el.type === "checkbox") el.checked = !!s[k];
+    else el.value = (s[k] === null || s[k] === undefined) ? "" : s[k];
+  });
+  $("version").textContent = "текущая версия: " + st.version;
+  refreshToggles();
+  renderStats(st.stats);
+  renderDeps(st.deps);
+  renderPathRow("temp", st.paths.temp);
+  renderPathRow("cache", st.paths.cache);
+  // последнее подтверждённое значение — на него откатываем при отмене модалки
+  concurPrevValue = $("max_concurrent_downloads").value || "3";
+}
+
+// ---- Зависимые блоки (переиспользуемая логика чекбокс+поле) ----
+function refreshToggles(){
+  // cookies — прогрессивное раскрытие в три состояния:
+  //  1) use_cookies выкл → весь блок cookiesBlock скрыт целиком
+  //  2) use_cookies вкл + cookies_from_browser вкл → дропдаун браузера
+  //  3) use_cookies вкл + cookies_from_browser выкл → поле файла + инструкция
+  const useCookies = $("use_cookies").checked;
+  $("cookiesBlock").classList.toggle("hidden", !useCookies);
+  const auto = $("cookies_from_browser").checked;
+  $("cookies_browser_row").classList.toggle("hidden", !(useCookies && auto));
+  $("cookies_file_row").classList.toggle("hidden", !(useCookies && !auto));
+}
+
+// ---- Статистика очистки ----
+let lastStats = null;
+function renderStats(stats){
+  lastStats = stats;
+  const line = (s) => {
+    if(!s || !s.exists) return "пусто";
+    const parts = [];
+    if(s.size) parts.push("размер: " + fmtSize(s.size));
+    parts.push("изменён: " + fmtDate(s.mtime));
+    parts.push("обращение: " + fmtDate(s.atime));
+    return parts.join("  ·  ");
+  };
+  $("meta_cache").textContent = line(stats.cache);
+  $("meta_temp").textContent = line(stats.temp);
+  const cookiesExist = !!(stats.cookies && stats.cookies.exists);
+  $("meta_cookies").textContent = cookiesExist
+    ? line(stats.cookies) : "файл куки не используется или не найден";
+  $("btnRevealCookies").disabled = !cookiesExist;
+  $("meta_log").textContent = stats.log && stats.log.exists
+    ? line(stats.log) : "лог пока не создан";
+  // дата файла куки рядом с полем (насколько старый экспорт)
+  const age = $("cookies_file_age");
+  if(stats.cookies && stats.cookies.exists)
+    age.textContent = "файл изменён: " + fmtDate(stats.cookies.mtime) +
+      " — учтите, что куки со временем устаревают.";
+  else age.textContent = "";
+}
+
+// ---- Сохранение ----
+async function save(key, value, errBox){
+  try{
+    const res = await fetch("/settings/api/save", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({[key]: value})
+    });
+    const d = await res.json();
+    if(!res.ok){
+      if(errBox) errBox.textContent = d.error || "Некорректное значение.";
+      return false;
+    }
+    if(errBox) errBox.textContent = "";
+    if(d.stats) renderStats(d.stats);
+    if(d.paths){ renderPathRow("temp", d.paths.temp); renderPathRow("cache", d.paths.cache); }
+    flash();
+    return true;
+  }catch(e){ if(errBox) errBox.textContent = "Ошибка сохранения."; return false; }
+}
+
+function errBoxFor(key){ return document.querySelector(`[data-err="${key}"]`); }
+
+// ---- Пути temp/cache: три режима (этап 4) ----
+// Дропдаун 2/8 · поле пути 4/8 · кнопка 2/8 (см. .path-row в <style>).
+// Поле пути показывает актуальный путь во ВСЕХ трёх режимах, но редактируемо
+// только в "custom" — app/system читаются мгновенно из уже загруженного
+// состояния (app_path/system_path), без похода на сервер при переключении.
+function pathValueForMode(mode, data){
+  if(mode === "system") return data.system_path;
+  if(mode === "custom") return data.custom_path;
+  return data.app_path;
+}
+
+function renderPathRow(kind, data){
+  PATH_STATE[kind] = data;
+  const modeSel = $(kind + "_mode");
+  const input = $(kind + "_path_display");
+  const btn = $(kind + "_path_btn");
+  const row = $(kind + "_row");
+  const err = $(kind + "_err");
+
+  modeSel.value = data.mode;
+  input.value = pathValueForMode(data.mode, data);
+  input.readOnly = data.mode !== "custom";
+  btn.textContent = data.mode === "custom" ? "обзор…" : "открыть";
+
+  const invalid = !data.available;
+  row.classList.toggle("path-invalid", invalid);
+  err.textContent = invalid ? `папка недоступна: ${data.configured_path}` : "";
+}
+
+["temp", "cache"].forEach(kind=>{
+  $(kind + "_mode").addEventListener("change", ()=>{
+    save(kind + "_mode", $(kind + "_mode").value);
+  });
+
+  // Редактирование пути — активно только в режиме "custom" (поле readonly в
+  // остальных, событие input там браузер и не создаст).
+  let t = null;
+  const input = $(kind + "_path_display");
+  input.addEventListener("input", ()=>{
+    clearTimeout(t);
+    t = setTimeout(()=> save(kind + "_custom_path", input.value, $(kind + "_err")), 450);
+  });
+  input.addEventListener("blur", ()=>{
+    clearTimeout(t);
+    save(kind + "_custom_path", input.value, $(kind + "_err"));
+  });
+
+  // Кнопка: "custom" → диалог выбора папки (как у cookies);
+  // "app"/"system" → создать (если нет) и открыть в проводнике.
+  $(kind + "_path_btn").addEventListener("click", async ()=>{
+    const btn = $(kind + "_path_btn");
+    const mode = (PATH_STATE[kind] || {}).mode;
+    const old = btn.textContent;
+    btn.disabled = true; btn.textContent = "…";
+    try{
+      if(mode === "custom"){
+        const res = await fetch("/settings/api/pick", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({kind:"dir"})
+        });
+        const d = await res.json();
+        if(res.ok && d.path){
+          input.value = d.path;
+          await save(kind + "_custom_path", d.path, $(kind + "_err"));
+        }
+      }else{
+        await fetch("/settings/api/open_path", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({target: kind})
+        });
+      }
+    }catch(e){}
+    finally{ btn.disabled = false; btn.textContent = old; }
+  });
+});
+
+// Живой поллинг доступности (диск могли отключить/подключить прямо во время
+// работы со страницей настроек) — обновляет только пульсацию/текст ошибки,
+// не режим/путь (они не меняются извне).
+async function pollPathsStatus(){
+  try{
+    const d = await (await fetch("/api/paths_status")).json();
+    ["temp", "cache"].forEach(kind=>{
+      if(!PATH_STATE[kind]) return;
+      renderPathRow(kind, {...PATH_STATE[kind],
+        available: d[kind].available, configured_path: d[kind].path});
+    });
+  }catch(e){}
+}
+setInterval(pollPathsStatus, 5000);
+
+// привязка автосохранения ко всем полям (кроме max_concurrent_downloads —
+// у него своя логика с подтверждением при выборе "без ограничений", см. ниже)
+qa("[data-key]").forEach(el=>{
+  const k = el.dataset.key;
+  if(k === "max_concurrent_downloads") return;
+  if(el.type === "checkbox"){
+    el.addEventListener("change", async ()=>{ await save(k, el.checked); refreshToggles(); });
+  }else if(el.tagName === "SELECT"){
+    el.addEventListener("change", ()=> save(k, el.value, errBoxFor(k)));
+  }else{
+    // текст/число — с задержкой
+    let t=null;
+    el.addEventListener("input", ()=>{ clearTimeout(t);
+      t=setTimeout(()=> save(k, el.value, errBoxFor(k)), 450); });
+    el.addEventListener("blur", ()=>{ clearTimeout(t); save(k, el.value, errBoxFor(k)); });
+  }
+});
+
+// ---- Тема: применяется мгновенно на <html>, без ожидания ответа сервера и
+// без перезагрузки (сохранение уже идёт через общий save() выше — этот
+// листенер только про немедленный визуальный эффект на текущей странице). ----
+$("theme").addEventListener("change", ()=>{
+  document.documentElement.setAttribute("data-theme", $("theme").value);
+});
+
+// ---- Cookies: раскрывающаяся инструкция экспорта (ручной режим) ----
+$("btnCookieHelp").addEventListener("click", ()=>{
+  $("cookieHelp").classList.toggle("hidden");
+});
+
+// ---- Обзор (нативный диалог) ----
+qa("[data-pick]").forEach(btn=>{
+  btn.addEventListener("click", async ()=>{
+    if(btn.disabled) return;
+    const kind = btn.dataset.pick, targetId = btn.dataset.target;
+    const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+    try{
+      const res = await fetch("/settings/api/pick", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({kind})
+      });
+      const d = await res.json();
+      if(res.ok && d.path){
+        const inp = $(targetId); inp.value = d.path;
+        await save(inp.dataset.key, d.path, errBoxFor(inp.dataset.key));
+      }
+    }catch(e){}
+    finally{ btn.disabled = false; btn.textContent = old; }
+  });
+});
+
+// ---- Очистка ----
+qa("[data-clear]").forEach(btn=>{
+  btn.addEventListener("click", async ()=>{
+    const target = btn.dataset.clear;
+    const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+    try{
+      const res = await fetch("/settings/api/clear", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({target})
+      });
+      const d = await res.json();
+      if(res.ok && d.stats) renderStats(d.stats);
+    }catch(e){}
+    finally{ btn.disabled = false; btn.textContent = old; }
+  });
+});
+
+// ---- Лог: показать в проводнике ----
+$("btnRevealLog").addEventListener("click", async ()=>{
+  const btn = $("btnRevealLog");
+  const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+  try{ await fetch("/settings/api/reveal_log", {method:"POST"}); }catch(e){}
+  finally{ btn.disabled = false; btn.textContent = old; }
+});
+
+// ---- Куки: показать файл в проводнике (не очистка — см. renderStats,
+// кнопка задизейблена, пока cookies.txt не найден). ----
+$("btnRevealCookies").addEventListener("click", async ()=>{
+  const btn = $("btnRevealCookies");
+  if(btn.disabled) return;
+  const old = btn.textContent; btn.disabled = true; btn.textContent = "…";
+  try{
+    await fetch("/settings/api/open_path", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({target:"cookies"})
+    });
+  }catch(e){}
+  finally{ btn.textContent = old; btn.disabled = !(lastStats && lastStats.cookies && lastStats.cookies.exists); }
+});
+
+// ---- Зависимости: расположение (bin/ или система) + обновление (yt-dlp) /
+// переустановка (ffmpeg, Deno — своей логики обновления у них нет, только
+// «переустановить» = заново открыть окно установки, этап 2). ----
+let ytdlpBtnMode = "check";      // "check" (проверить обновление) | "update" (обновить)
+let ytdlpSourceKind = "";        // "bin"|"pip"|"system-other"|"missing" — см. core.ytdlp_source_kind
+let depsGroups = {};
+
+function locationLabel(source){
+  if(source === "bin") return "в папке приложения (bin/)";
+  if(source === "system") return "в системе";
+  if(source === "mixed") return "частично в bin/, частично в системе";
+  return "не найдено";
+}
+function ytdlpLocationLabel(kind){
+  if(kind === "bin") return "в папке приложения (bin/)";
+  if(kind === "pip") return "в системе (pip)";
+  if(kind === "system-other") return "в системе (другой способ)";
+  return "не найдено";
+}
+
+// Статус при загрузке страницы (только расположение — версия/обновление
+// подтягиваются по клику «проверить обновление», как и раньше).
+function renderDeps(deps){
+  if(!deps) return;
+  depsGroups = deps.groups || {};
+  ytdlpSourceKind = deps.ytdlp_source_kind || "";
+  $("meta_ytdlp").textContent = ytdlpLocationLabel(ytdlpSourceKind);
+  updateYtdlpBtnAvailability();
+  const fm = depsGroups.ffmpeg, dn = depsGroups.deno;
+  $("meta_ffmpeg").textContent = fm && fm.found ? locationLabel(fm.source) : "не найдено";
+  $("meta_deno").textContent = dn && dn.found ? locationLabel(dn.source) : "не найдено";
+}
+
+// bin/pip — обновление доступно; system-other/missing — приложение не
+// трогает установленное не через себя, кнопка неактивна с понятной подписью.
+function updateYtdlpBtnAvailability(){
+  const btn = $("btnCheckYtdlp");
+  if(ytdlpSourceKind === "system-other"){
+    btn.disabled = true; btn.textContent = "обновите вручную";
+  }else if(ytdlpSourceKind === "missing"){
+    btn.disabled = true; btn.textContent = "не найден";
+  }else{
+    btn.disabled = false;
+    setYtdlpBtnMode(ytdlpBtnMode);
+  }
+}
+
+function renderYtdlp(d){
+  if(!d) return;
+  if(d.source_kind) ytdlpSourceKind = d.source_kind;
+  let statusText;
+  if(d.status === "updated") statusText = "обновлён (версия " + d.current + ")";
+  else if(d.status === "available") statusText = "доступна новая версия " + d.latest + " (у вас " + d.current + ")";
+  else statusText = d.message || "не удалось проверить";
+  $("meta_ytdlp").textContent = ytdlpLocationLabel(ytdlpSourceKind) + "  ·  " + statusText;
+  updateYtdlpBtnAvailability();
+}
+
+function setYtdlpBtnMode(mode){
+  ytdlpBtnMode = mode;
+  $("btnCheckYtdlp").textContent = mode === "update" ? "обновить" : "проверить обновление";
+}
+
+$("btnCheckYtdlp").addEventListener("click", async ()=>{
+  if(ytdlpSourceKind === "system-other" || ytdlpSourceKind === "missing") return;
+  const btn = $("btnCheckYtdlp");
+  if(ytdlpBtnMode === "check"){
+    btn.disabled = true; btn.textContent = "проверяю…";
+    try{
+      const d = await (await fetch("/settings/api/check_ytdlp", {method:"POST"})).json();
+      renderYtdlp(d);
+      setYtdlpBtnMode(d.status === "available" ? "update" : "check");
+    }catch(e){
+      $("meta_ytdlp").textContent = "ошибка проверки";
+      setYtdlpBtnMode("check");
+      updateYtdlpBtnAvailability();
+    }
+  }else{
+    btn.disabled = true; btn.textContent = "обновляется…";
+    try{
+      const d = await (await fetch("/api/ytdlp_update_do", {method:"POST"})).json();
+      renderYtdlp(d);
+      // status "updated" — готово, возвращаемся к обычной проверке; иначе
+      // (снова "available" или "error") — оставляем "обновить" для повтора.
+      setYtdlpBtnMode(d.status === "updated" ? "check" : "update");
+    }catch(e){
+      $("meta_ytdlp").textContent = "ошибка обновления";
+      setYtdlpBtnMode("update");
+      updateYtdlpBtnAvailability();
+    }
+  }
+});
+
+// ffmpeg/Deno — без проверки версий, только переустановка через окно
+// установки; forced:true — компонент, скорее всего, уже на месте, это
+// осознанная переустановка, а не «не найдено».
+$("btnReinstallFfmpeg").addEventListener("click", ()=>{
+  openInstallModal(["ffmpeg", "ffprobe"], {forced: true});
+});
+$("btnReinstallDeno").addEventListener("click", ()=>{
+  openInstallModal(["deno"], {forced: true});
+});
+
+// ---- Сброс ----
+$("btnReset").addEventListener("click", ()=>{
+  showConfirm({
+    title: "сбросить настройки?",
+    text: "Все настройки вернутся к значениям по умолчанию. Действие необратимо — отменить его не получится.",
+    okText: "сбросить",
+    onConfirm: async ()=>{
+      try{
+        const st = await (await fetch("/settings/api/reset", {method:"POST"})).json();
+        applyState(st);
+      }catch(e){}
+      flash();
+    },
+  });
+});
+
+// ---- Лимит одновременных загрузок: подтверждение при выборе "без ограничений" ----
+const CONCURRENCY_WARNING = "Отключение лимита и большое количество одновременных загрузок " +
+  "может привести к временной блокировке IP или самого YouTube-аккаунта, куки которого " +
+  "используются для авторизации. Действуете на свой страх и риск.";
+$("max_concurrent_downloads").addEventListener("change", ()=>{
+  const el = $("max_concurrent_downloads");
+  if(el.value === "unlimited"){
+    showConfirm({
+      title: "отключить лимит одновременных загрузок?",
+      text: CONCURRENCY_WARNING,
+      onConfirm: async ()=>{
+        await save("max_concurrent_downloads", "unlimited", errBoxFor("max_concurrent_downloads"));
+        concurPrevValue = "unlimited";
+      },
+      onCancel: ()=>{ el.value = concurPrevValue || "3"; },
+    });
+  }else{
+    save("max_concurrent_downloads", el.value, errBoxFor("max_concurrent_downloads"));
+    concurPrevValue = el.value;
+  }
+});
+
+loadState();
+</script>
+{% endblock %}

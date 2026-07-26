@@ -1,0 +1,716 @@
+{% extends "_base.html" %}
+{% block title %}Скачать видео — jade.tools{% endblock %}
+{% block head %}
+<style>
+  /* Плейлисту нужно больше места под двухколоночную раскладку (обложка + список). */
+  .wrap{max-width:720px}
+
+  /* Блоки выбора («что скачать» уже .seg, «качество/формат» — этот ряд) всегда
+     занимают всю доступную ширину: flex распределяет её между видимыми полями,
+     сколько бы их ни было (2 для видео, 1 или 2 для звука/плейлиста) — в
+     отличие от фиксированной grid-сетки, где скрытые поля оставляли пустые
+     колонки. */
+  .field-row{display:flex;gap:12px;flex-wrap:wrap}
+  .field-row > div{flex:1;min-width:160px}
+  @media (max-width:560px){.field-row{flex-direction:column}}
+
+  /* Плейлист: обложка + инфо слева, список видео справа. */
+  .pl-layout{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+  .pl-cover{flex:0 0 170px;max-width:170px}
+  .pl-cover img{width:100%;border-radius:12px;border:1px solid var(--line);display:block}
+  .pl-cover h3{font-size:14px;font-weight:600;margin:10px 0 4px;word-break:break-word}
+  .pl-cover .sub{color:var(--muted);font-size:12px;margin-bottom:2px}
+  .pl-list{flex:1;min-width:260px;max-height:380px;overflow-y:auto;
+           border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2)}
+  .pl-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
+  .pl-row:last-child{border-bottom:none}
+  .pl-row:hover{background:var(--surface-hover)}
+  .pl-row input[type=checkbox]{flex:none;width:16px;height:16px;accent-color:var(--accent);cursor:pointer}
+  .pl-row img{width:64px;height:36px;object-fit:cover;border-radius:6px;flex:none;background:var(--surface-2)}
+  .pl-row .pl-meta{flex:1;min-width:0}
+  .pl-row .pl-meta .t{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pl-row .pl-meta .u{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pl-row .dur{color:var(--muted);font-size:11px;flex:none}
+  @media (max-width:560px){.pl-cover{flex:1 1 auto;max-width:none;display:flex;gap:12px;align-items:center}
+    .pl-cover img{width:110px;flex:none}.pl-cover h3{margin:0 0 4px}}
+
+  /* Список отдельных видео при скачивании плейлиста. */
+  .pl-child-list{max-height:280px;overflow-y:auto;border:1px solid var(--line);
+                 border-radius:var(--radius-sm);background:var(--surface-2)}
+  .pl-child-row{display:flex;align-items:center;gap:10px;padding:8px 10px;
+               border-bottom:1px solid var(--line);font-size:12px}
+  .pl-child-row:last-child{border-bottom:none}
+  .pl-child-row .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pl-child-row .st{flex:none;color:var(--muted);max-width:55%;text-align:right}
+  .pl-child-row .st.ok{color:var(--success)}
+  .pl-child-row .st.err{color:var(--error);white-space:normal;text-align:right}
+</style>
+{% endblock %}
+{% block content %}
+<div class="wrap">
+  <div class="page-head">
+    <h1>скачать</h1>
+    <p>видео, звук и плейлисты с YouTube и других сайтов через <code>yt-dlp</code> — локально, в один клик</p>
+  </div>
+
+  <!-- Шаг 1: ссылка -->
+  <div class="card">
+    <label for="url">ссылка на видео или плейлист (youtube и другие сайты)</label>
+    <div class="url-row">
+      <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=... или .../playlist?list=..." autocomplete="off">
+      <button id="btnInfo">получить информацию</button>
+    </div>
+    <p class="hint">можно вставить обычную ссылку youtube, <code>youtu.be/...</code>, Shorts, ссылку на
+      плейлист — или ссылку с любого другого сайта, который поддерживает <code>yt-dlp</code>
+      (TikTok, Instagram, Vimeo и т.д.; плейлисты — только с YouTube).</p>
+    <div id="infoMsg"></div>
+  </div>
+
+  <!-- Шаг 2: настройки -->
+  <div class="card hidden" id="settings">
+    <div class="preview" id="preview"></div>
+
+    <div class="hidden" id="playlistPreview">
+      <div class="pl-layout">
+        <div class="pl-cover">
+          <img id="plCoverImg" src="" alt="">
+          <h3 id="plTitle"></h3>
+          <div class="sub" id="plUploader"></div>
+          <div class="sub" id="plCount"></div>
+          <button id="plToggleAllBtn" class="ghost" style="width:100%;margin-top:10px">выделить все</button>
+        </div>
+        <div class="pl-list" id="plList"></div>
+      </div>
+    </div>
+
+    <div style="height:16px"></div>
+    <label>что скачать</label>
+    <div class="seg" id="modeSeg">
+      <button data-mode="video_audio" class="active"><span data-icon="clapperboard"></span> видео + звук</button>
+      <button data-mode="video_only"><span data-icon="film"></span> только видео</button>
+      <button data-mode="audio_only"><span data-icon="music"></span> только звук</button>
+    </div>
+
+    <div style="height:16px"></div>
+    <div class="field-row">
+      <div id="qualityWrap">
+        <label id="qualityLabel">качество видео</label>
+        <select id="quality"></select>
+      </div>
+      <div id="videoFmtWrap">
+        <label>формат видео</label>
+        <select id="videoFmt"></select>
+      </div>
+      <div id="audioWrap" class="hidden">
+        <label id="audioLabel">качество звука</label>
+        <select id="audio"><option value="">Авто (лучшее)</option></select>
+      </div>
+      <div id="audioFmtWrap" class="hidden">
+        <label>формат звука</label>
+        <select id="audioFmt"></select>
+      </div>
+    </div>
+
+    <div class="hidden" id="deliveryWrap">
+      <div style="height:16px"></div>
+      <label>способ доставки</label>
+      <div class="seg" id="deliverySeg">
+        <button data-delivery="zip" class="active"><span data-icon="package"></span> скачать в .zip</button>
+        <button data-delivery="stream"><span data-icon="download"></span> потоковая загрузка</button>
+      </div>
+    </div>
+
+    <div style="height:16px"></div>
+    <button id="btnDownload" style="width:100%"><span data-icon="download"></span> скачать</button>
+  </div>
+
+  <!-- Шаг 3а: прогресс одиночного видео -->
+  <div class="card hidden" id="progressCard">
+    <label id="progTitle">скачивание…</label>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="prog-line">
+      <span id="progPct">0%</span>
+      <span id="progSpeed"></span>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px">
+      <button id="btnCancel" class="ghost">отменить</button>
+      <a id="btnGetFile" class="hidden" href="#" style="text-decoration:none">
+        <button style="width:100%"><span data-icon="save"></span> сохранить файл</button>
+      </a>
+    </div>
+    <div id="progMsg"></div>
+  </div>
+
+  <!-- Шаг 3б: прогресс плейлиста -->
+  <div class="card hidden" id="playlistProgressCard">
+    <label id="plProgTitle">скачивание плейлиста…</label>
+    <div class="bar"><i id="plBarFill"></i></div>
+    <div class="prog-line">
+      <span id="plProgPct">0%</span>
+      <span id="plProgStage"></span>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px">
+      <button id="plBtnCancel" class="ghost">отменить</button>
+      <a id="plBtnGetFile" class="hidden" href="#" style="text-decoration:none">
+        <button style="width:100%"><span data-icon="save"></span> сохранить архив</button>
+      </a>
+    </div>
+    <div id="plProgMsg"></div>
+    <div style="height:12px"></div>
+    <div class="pl-child-list" id="plChildList"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+let currentJob = null;        // одиночное видео: {job_id, info}
+let currentPlaylist = null;   // плейлист: {job_id, playlist, checked:Set<id>}
+let isPlaylist = false;
+let pollTimer = null;
+let plPollTimer = null;
+let activeMode = "video_audio";
+let activeDelivery = "zip";
+let autoSavedJob = null;
+let streamSavedChildren = new Set();
+
+// Предпочтения из настроек (раздел «предпочтения скачивания») — берём как
+// умолчание для дропдаунов формата, но только если значение реально входит
+// в список форматов, которые умеет отдавать этот инструмент: словарь настроек
+// шире (например, video_ext допускает "original"/"mov", которых нет среди
+// VIDEO_FORMATS в tools/youtube.py) — для несовпадающих тихо остаёмся на
+// прежнем дефолте mp4/mp3, без ошибки.
+const PREF_VIDEO_EXT = {{ settings.video_ext|tojson }};
+const PREF_AUDIO_EXT = {{ settings.audio_ext|tojson }};
+
+async function loadFormats(){
+  try{
+    const res = await fetch("/youtube/api/formats");
+    const data = await res.json();
+    const videoDef = data.video.some(v=>v.key===PREF_VIDEO_EXT) ? PREF_VIDEO_EXT : "mp4";
+    const audioDef = data.audio.some(a=>a.key===PREF_AUDIO_EXT) ? PREF_AUDIO_EXT : "mp3";
+    fillSelect("videoFmt", data.video, videoDef);
+    fillSelect("audioFmt", data.audio, audioDef);
+  }catch(e){
+    fillSelect("videoFmt", [{key:"mp4",label:"MP4"},{key:"webm",label:"WebM"},{key:"mkv",label:"MKV"}], "mp4");
+    fillSelect("audioFmt", [{key:"mp3",label:"MP3"},{key:"m4a",label:"M4A"},{key:"wav",label:"WAV"},{key:"opus",label:"Opus"}], "mp3");
+  }
+}
+function fillSelect(id, items, defKey){
+  const sel = $(id);
+  sel.innerHTML = "";
+  items.forEach(it=>{
+    const el = document.createElement("option");
+    el.value = it.key; el.textContent = it.label;
+    if(it.key === defKey) el.selected = true;
+    sel.appendChild(el);
+  });
+}
+loadFormats();
+
+function setMsg(el, text, type){
+  el.innerHTML = text ? `<div class="msg ${type}">${escapeHtml(text)}</div>` : "";
+}
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, c => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+  ));
+}
+function fmtTime(s){
+  s = Math.floor(s||0);
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  const mm = String(m).padStart(2,"0"), ss = String(sec).padStart(2,"0");
+  return h>0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+$("btnInfo").addEventListener("click", async () => {
+  const url = $("url").value.trim();
+  if(!url){ setMsg($("infoMsg"), "Вставьте ссылку на видео или плейлист.", "err"); return; }
+  const btn = $("btnInfo");
+  btn.disabled = true; btn.textContent = "Получаю…";
+  setMsg($("infoMsg"), "", "");
+  stopPolling(); stopPlaylistPolling();
+  $("progressCard").classList.add("hidden");
+  $("playlistProgressCard").classList.add("hidden");
+  try{
+    const res = await fetch("/youtube/api/info", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({url})
+    });
+    const data = await res.json();
+    if(!res.ok){
+      if(data.need_install){ openInstallModal(data.missing_deps); return; }
+      throw new Error(data.error || "Ошибка");
+    }
+    isPlaylist = !!data.is_playlist;
+    if(isPlaylist){
+      currentJob = null;
+      currentPlaylist = {
+        job_id: data.job_id, playlist: data.playlist,
+        checked: new Set((data.playlist.entries||[]).map(e=>e.id)),
+      };
+      renderPlaylist(currentPlaylist);
+    }else{
+      currentPlaylist = null;
+      currentJob = {job_id:data.job_id, info:data.info};
+      renderInfo(data.info);
+    }
+    $("settings").classList.remove("hidden");
+  }catch(e){
+    setMsg($("infoMsg"), e.message, "err");
+    $("settings").classList.add("hidden");
+  }finally{
+    btn.disabled = false; btn.textContent = "получить информацию";
+  }
+});
+
+function renderInfo(info){
+  $("preview").classList.remove("hidden");
+  $("playlistPreview").classList.add("hidden");
+  $("deliveryWrap").classList.add("hidden");
+  $("preview").innerHTML = `
+    ${info.thumbnail ? `<img src="${info.thumbnail}" alt="">` : ""}
+    <div class="meta">
+      <h3>${escapeHtml(info.title)}</h3>
+      ${info.uploader ? `<div class="sub">${ICONS.user} ${escapeHtml(info.uploader)}</div>`:""}
+      ${info.duration ? `<div class="sub">${ICONS.timer} ${fmtTime(info.duration)}</div>`:""}
+    </div>`;
+  buildQualityOptions(activeMode, info);
+  applyModeVisibility(activeMode);
+  updateDownloadButtonLabel();
+}
+
+function renderPlaylist(state){
+  $("preview").classList.add("hidden");
+  $("playlistPreview").classList.remove("hidden");
+  $("deliveryWrap").classList.remove("hidden");
+
+  const p = state.playlist;
+  const first = (p.entries || [])[0] || {};
+  const cover = p.thumbnail || first.thumbnail || "";
+  const coverImg = $("plCoverImg");
+  coverImg.src = cover;
+  coverImg.style.display = cover ? "" : "none";
+  $("plTitle").textContent = p.title || "Плейлист";
+  $("plUploader").innerHTML = p.uploader ? `${ICONS.user} ${escapeHtml(p.uploader)}` : "";
+  $("plCount").textContent = `${(p.entries||[]).length} видео`;
+
+  const list = $("plList");
+  list.innerHTML = "";
+  (p.entries||[]).forEach(e=>{
+    const row = document.createElement("label");
+    row.className = "pl-row";
+    row.innerHTML = `
+      <input type="checkbox" checked>
+      <img src="${e.thumbnail||""}" alt="" loading="lazy">
+      <div class="pl-meta">
+        <div class="t">${escapeHtml(e.title)}</div>
+        <div class="u">${escapeHtml(e.uploader||"")}</div>
+      </div>
+      <div class="dur">${e.duration ? fmtTime(e.duration) : ""}</div>`;
+    const cb = row.querySelector("input");
+    cb.addEventListener("change", ()=>{
+      if(cb.checked) state.checked.add(e.id); else state.checked.delete(e.id);
+      updateDownloadButtonLabel();
+      updateToggleAllButton();
+    });
+    list.appendChild(row);
+  });
+
+  buildQualityOptionsPlaylist(activeMode);
+  applyModeVisibility(activeMode);
+  updateDownloadButtonLabel();
+  updateToggleAllButton();
+}
+
+function updateToggleAllButton(){
+  if(!currentPlaylist) return;
+  const total = (currentPlaylist.playlist.entries || []).length;
+  const allSelected = total > 0 && currentPlaylist.checked.size === total;
+  $("plToggleAllBtn").textContent = allSelected ? "убрать выделения" : "выделить все";
+}
+
+$("plToggleAllBtn").addEventListener("click", ()=>{
+  if(!currentPlaylist) return;
+  const entries = currentPlaylist.playlist.entries || [];
+  const allSelected = entries.length > 0 && currentPlaylist.checked.size === entries.length;
+  document.querySelectorAll("#plList input[type=checkbox]").forEach(cb=>{ cb.checked = !allSelected; });
+  currentPlaylist.checked = allSelected ? new Set() : new Set(entries.map(e=>e.id));
+  updateDownloadButtonLabel();
+  updateToggleAllButton();
+});
+
+function updateDownloadButtonLabel(){
+  if(isPlaylist && currentPlaylist){
+    $("btnDownload").innerHTML = ICONS.download + ` скачать (${currentPlaylist.checked.size})`;
+  }else{
+    $("btnDownload").innerHTML = ICONS.download + " скачать";
+  }
+}
+
+function buildQualityOptions(mode, info){
+  const q = $("quality");
+  q.innerHTML = "";
+  let opts = [];
+  if(mode === "audio_only"){
+    opts = [{value:0, label:"Авто (лучший битрейт)"}];
+  }else{
+    const heights = info.combined_heights || [];
+    if(mode === "video_only"){
+      const videoOnly = info.video_only || [];
+      const maxH = videoOnly[0] && videoOnly[0].height;
+      opts.push({value:0, label: maxH ? `Наилучшее (${maxH}p)` : "Наилучшее (авто)"});
+      // Первый элемент (максимум) уже назван выше в «Наилучшее (Np)» — не
+      // повторять его отдельным пунктом с тем же значением.
+      videoOnly.slice(1).forEach(v=>{
+        opts.push({value:v.height, label:v.label + (v.ext?` (.${v.ext})`:"")});
+      });
+    }else{
+      const maxH = heights[0] && heights[0].height;
+      opts.push({value:0, label: maxH ? `Наилучшее (${maxH}p)` : "Наилучшее (авто)"});
+      heights.slice(1).forEach(h=> opts.push({value:h.height,label:h.label}));
+    }
+  }
+  opts.forEach(o=>{
+    const el = document.createElement("option");
+    el.value = o.value; el.textContent = o.label; q.appendChild(el);
+  });
+  const a = $("audio");
+  a.innerHTML = "";
+  const autoA = document.createElement("option");
+  autoA.value = ""; autoA.textContent = "Авто (лучшее)";
+  a.appendChild(autoA);
+  (info.audio || []).forEach(x=>{
+    const el = document.createElement("option");
+    el.value = x.id; el.textContent = `${x.label} (.${x.ext})`; a.appendChild(el);
+  });
+}
+
+function buildQualityOptionsPlaylist(mode){
+  // Плейлист: --flat-playlist не даёт форматов каждого ролика, поэтому качество
+  // выбирается из стандартного набора высот (core/tools/youtube.py:
+  // PLAYLIST_HEIGHTS), а конкретная аудиодорожка по id не выбирается — она
+  // может не совпадать между разными видео плейлиста, только формат/авто.
+  const q = $("quality");
+  q.innerHTML = "";
+  let opts = [];
+  if(mode === "audio_only"){
+    opts = [{value:0, label:"Авто (лучший битрейт)"}];
+  }else{
+    opts.push({value:0, label:"Наилучшее (авто)"});
+    ((currentPlaylist && currentPlaylist.playlist.heights) || []).forEach(h=>{
+      opts.push({value:h, label:`${h}p`});
+    });
+  }
+  opts.forEach(o=>{
+    const el = document.createElement("option");
+    el.value = o.value; el.textContent = o.label; q.appendChild(el);
+  });
+  const a = $("audio");
+  a.innerHTML = "";
+  const autoA = document.createElement("option");
+  autoA.value = ""; autoA.textContent = "Авто (лучшее)";
+  a.appendChild(autoA);
+}
+
+function applyModeVisibility(mode){
+  const isAudio = mode === "audio_only";
+  $("qualityWrap").classList.toggle("hidden", isAudio);
+  $("videoFmtWrap").classList.toggle("hidden", isAudio);
+  // Выбор конкретной аудиодорожки по id не имеет смысла для плейлиста.
+  $("audioWrap").classList.toggle("hidden", !isAudio || isPlaylist);
+  $("audioFmtWrap").classList.toggle("hidden", !isAudio);
+  $("qualityLabel").textContent = isAudio ? "битрейт звука" : "качество видео";
+  $("audioLabel").textContent = isAudio ? "источник звука" : "качество звука";
+}
+
+document.querySelectorAll("#modeSeg button").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    document.querySelectorAll("#modeSeg button").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    activeMode = b.dataset.mode;
+    if(isPlaylist && currentPlaylist){ buildQualityOptionsPlaylist(activeMode); }
+    else if(currentJob){ buildQualityOptions(activeMode, currentJob.info); }
+    applyModeVisibility(activeMode);
+  });
+});
+
+document.querySelectorAll("#deliverySeg button").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    document.querySelectorAll("#deliverySeg button").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    activeDelivery = b.dataset.delivery;
+  });
+});
+
+$("url").addEventListener("keydown", e=>{ if(e.key === "Enter") $("btnInfo").click(); });
+
+$("btnDownload").addEventListener("click", async ()=>{
+  if(isPlaylist){ await startPlaylistDownload(); }
+  else{ await startSingleDownload(); }
+});
+
+async function startSingleDownload(){
+  if(!currentJob){ return; }
+  const url = $("url").value.trim();
+  const payload = {
+    url,
+    job_id: currentJob.job_id,
+    mode: activeMode,
+    height: parseInt($("quality").value, 10) || 0,
+    audio_id: activeMode === "audio_only" ? ($("audio").value || "") : "",
+    video_format: $("videoFmt").value || "mp4",
+    audio_format: $("audioFmt").value || "mp3",
+  };
+  const btn = $("btnDownload");
+  btn.disabled = true; btn.textContent = "Запускаю…";
+  try{
+    const res = await fetch("/youtube/api/download", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(!res.ok){
+      if(data.need_install){ openInstallModal(data.missing_deps); return; }
+      throw new Error(data.error || "Не удалось запустить");
+    }
+    startPolling(currentJob.job_id);
+    $("progressCard").classList.remove("hidden");
+    $("btnGetFile").classList.add("hidden");
+    $("btnCancel").disabled = false;
+    setMsg($("progMsg"), "", "");
+  }catch(e){
+    $("progressCard").classList.remove("hidden");
+    setMsg($("progMsg"), e.message, "err");
+  }finally{
+    btn.disabled = false; updateDownloadButtonLabel();
+  }
+}
+
+async function startPlaylistDownload(){
+  if(!currentPlaylist){ return; }
+  const selected_ids = Array.from(currentPlaylist.checked);
+  if(!selected_ids.length){
+    setMsg($("infoMsg"), "Выберите хотя бы одно видео из плейлиста.", "err");
+    return;
+  }
+  const payload = {
+    job_id: currentPlaylist.job_id,
+    mode: activeMode,
+    height: parseInt($("quality").value, 10) || 0,
+    audio_id: "",
+    video_format: $("videoFmt").value || "mp4",
+    audio_format: $("audioFmt").value || "mp3",
+    selected_ids,
+    delivery: activeDelivery,
+  };
+  const btn = $("btnDownload");
+  btn.disabled = true; btn.textContent = "Запускаю…";
+  try{
+    const res = await fetch("/youtube/api/download_playlist", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(!res.ok){
+      if(data.need_install){ openInstallModal(data.missing_deps); return; }
+      throw new Error(data.error || "Не удалось запустить");
+    }
+    streamSavedChildren = new Set();
+    startPlaylistPolling(currentPlaylist.job_id, data.sub_jobs || []);
+    $("playlistProgressCard").classList.remove("hidden");
+    $("plBtnGetFile").classList.add("hidden");
+    $("plBtnCancel").disabled = false;
+    setMsg($("plProgMsg"), "", "");
+  }catch(e){
+    $("playlistProgressCard").classList.remove("hidden");
+    setMsg($("plProgMsg"), e.message, "err");
+  }finally{
+    btn.disabled = false; updateDownloadButtonLabel();
+  }
+}
+
+function startPolling(jobId){
+  stopPolling();
+  pollTimer = setInterval(()=> pollOnce(jobId), 800);
+  pollOnce(jobId);
+}
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
+
+async function pollOnce(jobId){
+  try{
+    const res = await fetch("/api/status/" + jobId);
+    const s = await res.json();
+    updateProgress(s);
+    if(s.status === "done" || s.status === "error" || s.status === "canceled") stopPolling();
+  }catch(e){}
+}
+
+function updateProgress(s){
+  const pct = Math.max(0, Math.min(100, s.progress||0));
+  $("barFill").style.width = pct + "%";
+  $("progPct").textContent = (Math.round(pct*10)/10) + "%";
+  $("progSpeed").textContent = [s.speed, s.eta ? "ETA "+s.eta : ""].filter(Boolean).join("  ·  ");
+  const titles = {
+    pending:"подготовка…", downloading:"скачивание…",
+    done:"готово!", error:"ошибка", canceled:"отменено"
+  };
+  $("progTitle").textContent = titles[s.status] || s.status;
+  if(s.status === "done"){
+    $("barFill").style.width = "100%";
+    const a = $("btnGetFile");
+    a.href = "/api/file/" + encodeURIComponent(currentJob.job_id);
+    a.classList.remove("hidden");
+    setMsg($("progMsg"), "Файл готов — браузер сохраняет его автоматически.", "ok");
+    if(autoSavedJob !== currentJob.job_id){
+      autoSavedJob = currentJob.job_id;
+      triggerSave("/api/file/" + encodeURIComponent(currentJob.job_id));
+    }
+  }else if(s.status === "error"){
+    setMsg($("progMsg"), s.error || "Ошибка скачивания.", "err");
+  }else if(s.status === "canceled"){
+    setMsg($("progMsg"), "Скачивание отменено.", "err");
+  }else{
+    setMsg($("progMsg"), "", "");
+  }
+}
+
+const CHILD_STATUS_LABELS = {
+  pending:"ожидание…", downloading:"скачивание…", processing:"обработка…",
+  done:"готово", error:"ошибка", canceled:"отменено",
+};
+
+function renderPlaylistChildList(subJobs){
+  const wrap = $("plChildList");
+  wrap.innerHTML = "";
+  subJobs.forEach(sj=>{
+    const row = document.createElement("div");
+    row.className = "pl-child-row";
+    row.innerHTML = `
+      <span class="t">${escapeHtml(sj.title)}</span>
+      <span class="st" id="plc-st-${sj.job_id}">ожидание…</span>`;
+    wrap.appendChild(row);
+  });
+}
+
+function startPlaylistPolling(jobId, subJobs){
+  stopPlaylistPolling();
+  renderPlaylistChildList(subJobs);
+  plPollTimer = setInterval(()=> pollPlaylistOnce(jobId), 900);
+  pollPlaylistOnce(jobId);
+}
+function stopPlaylistPolling(){ if(plPollTimer){ clearInterval(plPollTimer); plPollTimer = null; } }
+
+const TERMINAL_STATUSES = ["done", "error", "canceled"];
+
+async function pollPlaylistOnce(jobId){
+  try{
+    const res = await fetch("/youtube/api/playlist_status/" + jobId);
+    const s = await res.json();
+    updatePlaylistProgress(jobId, s);
+    // Отмена плейлиста "мягкая": уже начатое видео доигрывает свою загрузку
+    // до конца (сервер не обрывает её), поэтому останавливаем опрос только
+    // когда родительская задача И каждое отдельное видео дошли до финального
+    // статуса — иначе прогресс последнего активного видео замрёт на старом
+    // значении, хотя оно ещё реально скачивается.
+    const parentDone = TERMINAL_STATUSES.includes(s.status);
+    const childrenDone = (s.children || []).every(c => TERMINAL_STATUSES.includes(c.status));
+    if(parentDone && childrenDone) stopPlaylistPolling();
+  }catch(e){}
+}
+
+function updatePlaylistProgress(jobId, s){
+  const pct = Math.max(0, Math.min(100, s.progress||0));
+  $("plBarFill").style.width = pct + "%";
+  $("plProgPct").textContent = (Math.round(pct*10)/10) + "%";
+  $("plProgStage").textContent = s.stage || `${s.done_count||0} из ${s.total_count||0}`;
+  const titles = {
+    downloading:"скачивание плейлиста…", processing:"упаковка в архив…",
+    done:"готово!", error:"ошибка", canceled:"отменено",
+  };
+  $("plProgTitle").textContent = titles[s.status] || s.status;
+
+  (s.children || []).forEach(c=>{
+    const stEl = document.getElementById("plc-st-" + c.job_id);
+    if(!stEl) return;
+    stEl.classList.remove("ok", "err");
+    if(c.status === "error"){
+      stEl.textContent = "ошибка" + (c.error ? ": " + c.error : "");
+      stEl.classList.add("err");
+    }else if(c.status === "downloading"){
+      stEl.textContent = `скачивание ${Math.round(c.progress||0)}%`;
+    }else if(s.status === "canceled" && c.status === "pending"){
+      // Отменённый плейлист: видео, до которых очередь не дошла, так и
+      // останутся "pending" на сервере навсегда — явно помечаем их как
+      // отменённые, а не оставляем висеть на "ожидание…".
+      stEl.textContent = "отменено";
+    }else{
+      stEl.textContent = CHILD_STATUS_LABELS[c.status] || c.status;
+      if(c.status === "done") stEl.classList.add("ok");
+    }
+
+    // Потоковая доставка: как только конкретное видео готово — сразу скачиваем
+    // его в браузер, не дожидаясь остальных.
+    if(activeDelivery === "stream" && c.status === "done" && !streamSavedChildren.has(c.job_id)){
+      streamSavedChildren.add(c.job_id);
+      triggerSave("/api/file/" + encodeURIComponent(c.job_id));
+    }
+  });
+
+  if(s.status === "done"){
+    $("plBarFill").style.width = "100%";
+    if(s.download_name){
+      const a = $("plBtnGetFile");
+      a.href = "/api/file/" + encodeURIComponent(jobId);
+      a.classList.remove("hidden");
+      setMsg($("plProgMsg"), "Архив готов — браузер сохраняет его автоматически.", "ok");
+      if(autoSavedJob !== jobId){
+        autoSavedJob = jobId;
+        triggerSave("/api/file/" + encodeURIComponent(jobId));
+      }
+    }else{
+      setMsg($("plProgMsg"), "Все выбранные видео скачаны.", "ok");
+    }
+  }else if(s.status === "error"){
+    setMsg($("plProgMsg"), s.error || "Ошибка скачивания плейлиста.", "err");
+  }else if(s.status === "canceled"){
+    setMsg($("plProgMsg"), "Скачивание отменено.", "err");
+  }else{
+    setMsg($("plProgMsg"), "", "");
+  }
+}
+
+function triggerSave(url){
+  let frame = document.getElementById("saveFrame");
+  if(!frame){
+    frame = document.createElement("iframe");
+    frame.id = "saveFrame"; frame.style.display = "none";
+    document.body.appendChild(frame);
+  }
+  frame.src = url;
+}
+
+$("btnCancel").addEventListener("click", async ()=>{
+  if(!currentJob) return;
+  // Не глушим поллинг и не подставляем текст руками — отмена на сервере не
+  // мгновенная (текущий подпроцесс должен успеть завершиться), поэтому даём
+  // обычному опросу статуса дождаться и показать реальный итог (см.
+  // updateProgress: статус "canceled" сам остановит поллинг и покажет сообщение).
+  $("btnCancel").disabled = true;
+  setMsg($("progMsg"), "Отменяю…", "");
+  try{ await fetch("/api/cancel/" + currentJob.job_id, {method:"POST"}); }catch(e){}
+});
+
+$("plBtnCancel").addEventListener("click", async ()=>{
+  if(!currentPlaylist) return;
+  // Как и для одиночного видео: отмена плейлиста доигрывает текущее
+  // скачивающееся видео и лишь потом останавливается (см. core.py /
+  // youtube.py _download_playlist_thread) — поэтому не рвём поллинг сразу,
+  // а даём ему дождаться и показать реальный финальный статус.
+  $("plBtnCancel").disabled = true;
+  setMsg($("plProgMsg"), "Отменяю — дожидаюсь завершения текущего видео…", "");
+  try{ await fetch("/api/cancel/" + currentPlaylist.job_id, {method:"POST"}); }catch(e){}
+});
+</script>
+{% endblock %}
