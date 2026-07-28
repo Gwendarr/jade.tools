@@ -35,6 +35,27 @@ else:
     BASE_DIR = Path(__file__).resolve().parent
 
 
+def _is_temp_launch():
+    """True, если BASE_DIR лежит внутри временной папки Windows (%TEMP%/%TMP%)
+    — типичный случай запуска exe прямо из архива без распаковки. Только для
+    собранного exe: при запуске из исходников BASE_DIR — папка с кодом, не
+    временная (см. onedir_and_startup_checks.md, часть 2)."""
+    if not getattr(sys, "frozen", False):
+        return False
+    base = os.path.normcase(os.path.normpath(str(BASE_DIR)))
+    for var in ("TEMP", "TMP"):
+        raw = os.environ.get(var)
+        if not raw:
+            continue
+        temp_root = os.path.normcase(os.path.normpath(raw))
+        if base == temp_root or base.startswith(temp_root + os.sep):
+            return True
+    return False
+
+
+RUNNING_FROM_TEMP = _is_temp_launch()
+
+
 def default_bin_dir():
     """Папка внешних бинарников (yt-dlp/ffmpeg/ffprobe/deno), ПЛОСКО, рядом с
     exe — первый шаг резолвинга каждой зависимости (см. resolve_dependency)."""
@@ -378,9 +399,13 @@ def _resolve_cookies_browser_spec(browser_key):
     """Значение для --cookies-from-browser по выбору в настройках."""
     appdata_name = _FIREFOX_FORK_APPDATA.get(browser_key)
     if not appdata_name:
-        return "firefox"
+        spec = "firefox"
+        logger.info("Cookies: резолвлен --cookies-from-browser = %s", spec)
+        return spec
     appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData/Roaming")
-    return f"firefox:{Path(appdata) / appdata_name}"
+    spec = f"firefox:{Path(appdata) / appdata_name}"
+    logger.info("Cookies: резолвлен --cookies-from-browser = %s", spec)
+    return spec
 
 
 def _resolve_mode_path(mode, custom_path, app_fn, system_fn):
@@ -567,6 +592,7 @@ def cookies_args():
     if not _settings.get("use_cookies"):
         return []
     if YT_COOKIES_BROWSER:
+        logger.info("yt-dlp: команда получит --cookies-from-browser %s", YT_COOKIES_BROWSER)
         return ["--cookies-from-browser", YT_COOKIES_BROWSER]
     if YT_COOKIES_FILE and os.path.isfile(YT_COOKIES_FILE):
         return ["--cookies", YT_COOKIES_FILE]

@@ -14,6 +14,7 @@ Flask-сервер, который:
 
 import os
 import signal
+import threading
 
 from flask import Flask, render_template, jsonify, send_file, abort, request
 
@@ -42,6 +43,14 @@ def _inject_theme():
 @app.context_processor
 def _inject_settings():
     return {"settings": core.get_settings()}
+
+
+# Запуск из временной папки (часть 2, см. onedir_and_startup_checks.md) — во
+# всех шаблонах сразу, чтобы блокирующая модалка (_base.html) появлялась
+# независимо от того, с какой страницы открылось приложение.
+@app.context_processor
+def _inject_temp_launch():
+    return {"running_from_temp": core.RUNNING_FROM_TEMP}
 
 
 # Регистрируем все инструменты.
@@ -96,6 +105,24 @@ def api_paths_status():
     открыта (см. соответствующие шаблоны) — дешёвая проверка (os.access),
     без обхода файловой системы."""
     return jsonify(core.paths_status())
+
+
+@app.route("/api/quit", methods=["POST"])
+def api_quit():
+    """Завершить приложение целиком (кнопка блокирующей модалки запуска из
+    временной папки, часть 2) — тот же эффект, что «Выход» из трея. Ответ
+    сначала уходит браузеру, процесс завершается с небольшой задержкой в
+    отдельном потоке."""
+    def _do_quit():
+        import time
+        time.sleep(0.3)
+        try:
+            core.cleanup_all_jobs()
+        except Exception:
+            pass
+        os._exit(0)
+    threading.Thread(target=_do_quit, daemon=True).start()
+    return jsonify({"ok": True})
 
 
 # --- Установка зависимостей (общее для всех инструментов + настроек) ---------

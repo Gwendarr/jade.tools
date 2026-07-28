@@ -58,6 +58,50 @@ PORT = int(os.environ.get("YTD_PORT", "5000"))
 URL = f"http://{HOST}:{PORT}"
 
 
+# --- Целостность ресурсов (часть 3) ------------------------------------------
+
+def _check_resources_or_die():
+    """Проверяет наличие ресурсов приложения (templates/*.html, logo.ico)
+    внутри _MEIPASS ДО запуска Flask и открытия браузера. Только для
+    собранного exe — из исходников файлы всегда рядом со скриптом.
+
+    Веб-модалка тут не годится: модалки живут в _base.html — ровно в файлах,
+    отсутствие которых проверяется. Поэтому нативный tkinter.messagebox.
+    Не проверяет внутренности самого PyInstaller (dll, tcl/tk и т.п.) — их
+    отсутствие роняет бутлоадер раньше, чем выполнится этот код."""
+    if not getattr(sys, "frozen", False):
+        return
+    required = [
+        os.path.join("templates", "_base.html"),
+        os.path.join("templates", "index.html"),
+        os.path.join("templates", "youtube.html"),
+        os.path.join("templates", "compress.html"),
+        os.path.join("templates", "trim.html"),
+        os.path.join("templates", "settings.html"),
+        "logo.ico",
+    ]
+    missing = [p for p in required
+               if not os.path.isfile(os.path.join(RESOURCE_DIR, p))]
+    if not missing:
+        return
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        messagebox.showerror(
+            "jade.tools — файлы приложения повреждены",
+            "Не найдены файлы: " + ", ".join(missing) + ".\n\n"
+            "Возможно, архив распакован не полностью или часть файлов "
+            "удалена антивирусом. Распакуйте архив заново целиком.",
+        )
+        root.destroy()
+    except Exception:
+        pass
+    os._exit(1)
+
+
 # --- Один экземпляр ---------------------------------------------------------
 
 def _kill_other_instances():
@@ -210,6 +254,9 @@ def _build_menu():
 
 
 def main():
+    # Проверка целостности ресурсов — до всего остального (часть 3).
+    _check_resources_or_die()
+
     import pystray
 
     # Флаг --no-browser отключает авто-открытие вкладки при старте.

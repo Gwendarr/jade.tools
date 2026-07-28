@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
-REM  Build jade.tools into a single .exe (no console window).
-REM  Result: dist\jade.tools.exe
+REM  Build jade.tools into a folder (onedir, no console window).
+REM  Result: dist\jade.tools\jade.tools.exe
 REM
 REM  NOTE: keep this file ASCII-only (no Cyrillic) and do NOT add
 REM  "chcp 65001" here - that combination is a known cmd.exe bug:
@@ -36,12 +36,13 @@ REM readme.txt must sit next to the exe on disk, not inside the PyInstaller
 REM bundle (jade.spec/datas) - a bundled file extracts into the temporary
 REM _MEIPASS folder, not next to the exe (same sys.executable vs __file__
 REM issue as the app's own portable paths, see CLAUDE.md).
-if exist readme.txt copy /y readme.txt dist\readme.txt >nul
+if exist readme.txt copy /y readme.txt dist\jade.tools\readme.txt >nul
 
 echo.
 echo ============================================
-echo  Done: dist\jade.tools.exe
-echo  Put this file into autostart if you want.
+echo  Done: dist\jade.tools\jade.tools.exe
+echo  Move the whole dist\jade.tools folder where you want it,
+echo  then put jade.tools.exe into autostart if you want.
 echo ============================================
 endlocal
 pause

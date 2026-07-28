@@ -321,6 +321,47 @@ document.addEventListener("DOMContentLoaded", ()=>{
     </svg>
   </a>
 
+  {% if running_from_temp %}
+  <!-- Запуск из временной папки Windows (onedir, часть 2) — БЛОКИРУЮЩАЯ
+       модалка на всех страницах (context processor app.py: _inject_temp_launch):
+       exe запущен прямо из архива, рабочие папки лягут во временную папку и
+       будут снесены системой. Единственный выход — закрыть приложение, без
+       крестика/клика по фону (тот же принцип, что у tempUnavailableModal на
+       главной странице). -->
+  <div class="modal-bg show" id="tempLaunchModal">
+    <div class="modal">
+      <h3>приложение запущено из временной папки</h3>
+      <p>Похоже, jade.tools запущен прямо из архива. Рабочие папки (bin, temp,
+        cache, logs) будут созданы во временной папке Windows и удалены
+        системой вместе со скачанными компонентами (~335 МБ). Распакуйте
+        архив целиком в постоянную папку и запустите jade.tools.exe оттуда.</p>
+      <div class="actions">
+        <button id="tempLaunchCloseBtn">закрыть приложение</button>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function(){
+    "use strict";
+    document.getElementById("tempLaunchCloseBtn").addEventListener("click", async function(){
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = "закрываю…";
+      try{ await fetch("/api/quit", {method:"POST"}); }catch(e){}
+      setTimeout(function(){
+        try{ window.open("", "_self"); window.close(); }catch(e){}
+        // window.close() работает только для вкладок, открытых скриптом —
+        // вкладку открывает Python (webbrowser), поэтому не полагаемся на
+        // закрытие и подстраховываемся текстом на месте модалки.
+        document.body.innerHTML =
+          '<div style="padding:40px;font-family:inherit;color:var(--muted,#999)">'
+          + 'jade.tools закрыт. Эту вкладку можно закрыть вручную.</div>';
+      }, 400);
+    });
+  })();
+  </script>
+  {% endif %}
+
   <!-- Окно установки зависимостей (этап 2) — общее для всех инструментов и
        настроек. Открывается через window.openInstallModal(missingDepNames);
        не блокирует работу насильно — можно закрыть крестиком/фоном (CLAUDE.md:

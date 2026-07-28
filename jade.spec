@@ -1,16 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec для сборки jade.tools в один .exe.
+PyInstaller spec для сборки jade.tools в папку (onedir).
 
 Особенности:
-  * onefile — один самораспаковывающийся exe (удобно для автозапуска);
+  * onedir — exe + папка _internal/ рядом (не onefile: самораспаковка
+    onefile-сборки во %TEMP% — типичный триггер ложных срабатываний
+    антивирусов на PyInstaller-бинарники, см. ARCHITECTURE.md);
   * windowed (noconsole) — без чёрного окна консоли (GUI-приложение в трее);
   * упакованы templates/ и logo.ico (нужны Flask-у приложению и трею);
   * иконка exe = logo.ico.
 
 Сборка:
     pyinstaller jade.spec
-Результат: dist/jade.tools.exe
+Результат: dist/jade.tools/jade.tools.exe (+ dist/jade.tools/_internal/)
 """
 
 block_cipher = None
@@ -54,20 +56,27 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='jade.tools',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,              # UPX часто роняет антивирусы; выключен.
-    runtime_tmpdir=None,
     console=False,          # windowed: без консольного окна.
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon='logo.ico',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    name='jade.tools',
 )
