@@ -330,15 +330,12 @@ function showConfirm({title, text, okText = "подтвердить", cancelText
     modal.classList.remove("show");
     okBtn.removeEventListener("click", onOk);
     cancelBtn.removeEventListener("click", onCancelClick);
-    modal.removeEventListener("click", onBg);
   }
   function onOk(){ cleanup(); if(onConfirm) onConfirm(); }
   function onCancelClick(){ cleanup(); if(onCancel) onCancel(); }
-  function onBg(e){ if(e.target === modal){ cleanup(); if(onCancel) onCancel(); } }
 
   okBtn.addEventListener("click", onOk);
   cancelBtn.addEventListener("click", onCancelClick);
-  modal.addEventListener("click", onBg);
   modal.classList.add("show");
 }
 

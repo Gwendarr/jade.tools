@@ -28,6 +28,10 @@
              border-radius:var(--radius-sm);overflow:hidden;user-select:none;touch-action:none}
   .wave-wrap.with-strip{border-radius:0 0 var(--radius-sm) var(--radius-sm)}
   #waveCanvas{display:block;width:100%;height:150px;cursor:text}
+  /* Shift над шкалой — grab, Shift+ЛКМ (тянем) — grabbing; выше по
+     специфичности, чем базовый cursor выше и cursor:ew-resize у #stripCanvas. */
+  #waveCanvas.pan-grab, #stripCanvas.pan-grab{cursor:grab}
+  #waveCanvas.pan-grabbing, #stripCanvas.pan-grabbing{cursor:grabbing}
   /* Чипы поверх волны/видеоряда — фон нарочно всегда тёмный (как таймкод на
      видео), поэтому текст фиксированно светлый, а не через var(--text)/
      var(--muted): в светлой теме те стали бы тёмными и слились бы с фоном. */
@@ -55,6 +59,43 @@
   .player .spacer{flex:1}
   .player .dur{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
   .pbtn{min-width:46px}
+
+  /* Выдвижная панель подсказок — НЕ модалка, паттерн .modal-bg не переиспользуется.
+     Расположена за редактором (меньший z-index, редактор непрозрачный сверху
+     скрывает бОльшую часть панели) слева; торчит узкая плашка-ручка с «?».
+     .ed-shell — общий контекст позиционирования для панели и карточки редактора. */
+  .ed-shell{position:relative}
+  .help-panel{
+    position:absolute;top:50%;right:100%;
+    width:var(--help-w, 300px);
+    display:flex;
+    background:#2b2b2b;border:1px solid var(--line);border-radius:var(--radius-sm);
+    transform:translateY(-50%) translateX(calc(100% - 44px));
+    transition:transform .28s ease-in-out;
+    z-index:5;
+  }
+  [data-theme="light"] .help-panel{background:#d4d4d4}
+  .help-panel.open{transform:translateY(-50%) translateX(-16px)}
+  #editor{position:relative;z-index:6}
+
+  .help-handle{flex:none;width:44px;display:flex;align-items:center;justify-content:center;
+               position:relative;cursor:pointer}
+  .help-q{width:26px;height:26px;border-radius:50%;flex:none;
+          background:var(--accent);color:var(--accent-text);
+          display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+  .help-tip{position:absolute;right:calc(100% + 8px);top:50%;transform:translateY(-50%);
+            background:rgba(0,0,0,.82);color:#fff;font-size:11px;padding:6px 10px;
+            border-radius:8px;white-space:nowrap;pointer-events:none;opacity:0;
+            transition:opacity .18s}
+  /* Только в свёрнутом виде — в развёрнутом подсказка избыточна, весь список уже виден. */
+  .help-panel:not(.open) .help-handle:hover .help-tip{opacity:1}
+  .help-panel:not(.open) .help-tip.auto-show{opacity:.55}
+
+  .help-body{flex:1;min-width:0;padding:14px 16px 14px 2px;
+             display:flex;flex-direction:column;gap:9px;font-size:12px}
+  .help-row{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+  .help-row code{flex:none}
+  .help-row span{color:var(--muted)}
 </style>
 {% endblock %}
 {% block content %}
@@ -110,6 +151,23 @@
   </div>
 
   <!-- Редактор -->
+  <div class="ed-shell">
+  <div class="help-panel hidden" id="helpPanel">
+    <div class="help-handle" id="helpHandle">
+      <span class="help-q">?</span>
+      <span class="help-tip" id="helpTip">помощь в управлении</span>
+    </div>
+    <div class="help-body">
+      <div class="help-row"><code>пробел</code><span>воспроизведение / пауза</span></div>
+      <div class="help-row"><code>колесо</code><span>зум вокруг курсора</span></div>
+      <div class="help-row"><code>ЛКМ по волне</code><span>поставить курсор воспроизведения</span></div>
+      <div class="help-row"><code>двойной клик</code><span>сброс зума на всю длину</span></div>
+      <div class="help-row"><code>shift + колесо</code><span>сдвиг шкалы (вверх — влево, вниз — вправо)</span></div>
+      <div class="help-row"><code>shift + ЛКМ (тянуть)</code><span>свободный сдвиг шкалы</span></div>
+      <div class="help-row"><code>ctrl + ЛКМ</code><span>поставить ближайший маркер</span></div>
+      <div class="help-row"><code>enter</code><span>в поле тайминга — подтвердить значение</span></div>
+    </div>
+  </div>
   <div class="card hidden" id="editor">
     <div class="ed-head">
       <div class="preview" id="trackInfo"></div>
@@ -228,6 +286,7 @@
 
     <div style="height:12px"></div>
     <button id="btnReset" class="ghost" style="width:100%">← другой файл</button>
+  </div>
   </div>
 
   <!-- Прогресс нарезки -->
@@ -535,6 +594,9 @@ function initEditor(d){
   $("qualityCard").classList.add("hidden");
   $("editor").classList.remove("hidden");
   $("progressCard").classList.add("hidden");
+  $("helpPanel").classList.remove("hidden");
+  updateHelpPanelWidth();
+  flashHelpTip();
 
   const sub = [];
   if(ed.duration) sub.push(ICONS.timer + " " + fmtTime(ed.duration, true));
@@ -762,16 +824,83 @@ function endDrag(){
 document.addEventListener("mouseup", endDrag);
 document.addEventListener("touchend", endDrag);
 
-// клик по волне = перемотка плеера
-waveCanvas.addEventListener("mousedown", e=>{
-  const rect = waveCanvas.getBoundingClientRect();
+// Ограничение окна просмотра в [0, ed.duration] без изменения его длины —
+// общее для зума, Shift-панорамирования колесом и Shift-перетаскивания.
+function clampView(a, b){
+  if(a < 0){ b -= a; a = 0; }
+  if(b > ed.duration){ a -= (b - ed.duration); b = ed.duration; }
+  view.a = Math.max(0, a); view.b = Math.min(ed.duration, b);
+}
+
+// Ближайший к t маркер (начало/конец) двигается к t; при равном расстоянии —
+// ничего (в т.ч. если start===end). Пересечься маркеры не могут: клик левее
+// середины отрезка всегда ближе к началу и остаётся левее конца, и наоборот —
+// отдельно ограничивать/менять местами не нужно.
+function moveNearestMarker(t){
+  const dStart = Math.abs(t - ed.start), dEnd = Math.abs(t - ed.end);
+  if(dStart === dEnd) return;
+  if(dStart < dEnd) ed.start = Math.min(t, ed.end - 0.05);
+  else ed.end = Math.max(t, ed.start + 0.05);
+}
+
+// клик по волне/видеоряду:
+//   без модификаторов (только волна) — перемотка плеера, как раньше;
+//   Ctrl — переместить ближайший маркер к точке клика + перемотка;
+//   Shift — начать панорамирование шкалы перетаскиванием (см. ниже).
+let panDrag = null;   // {startX, startA, startB} во время Shift-перетаскивания
+let shiftHeld = false;
+
+function setPanCursor(state){   // "" | "grab" | "grabbing"
+  [waveCanvas, stripCanvas].forEach(cv=>{
+    cv.classList.toggle("pan-grab", state === "grab");
+    cv.classList.toggle("pan-grabbing", state === "grabbing");
+  });
+}
+document.addEventListener("keydown", e=>{
+  if(e.key === "Shift" && !shiftHeld){ shiftHeld = true; if(!panDrag) setPanCursor("grab"); }
+});
+document.addEventListener("keyup", e=>{
+  if(e.key === "Shift"){ shiftHeld = false; if(!panDrag) setPanCursor(""); }
+});
+window.addEventListener("blur", ()=>{ shiftHeld = false; if(!panDrag) setPanCursor(""); });
+
+function onScaleMouseDown(e){
+  if(!ed) return;
+  if(e.shiftKey){
+    e.preventDefault();
+    panDrag = {startX: e.clientX, startA: view.a, startB: view.b};
+    setPanCursor("grabbing");
+    return;
+  }
+  const rect = e.currentTarget.getBoundingClientRect();
   const t = clamp(x2t(e.clientX - rect.left), 0, ed.duration);
+  if(e.ctrlKey){
+    e.preventDefault();
+    moveNearestMarker(t);
+  }else if(e.currentTarget !== waveCanvas){
+    return;   // обычный клик без модификаторов ставит курсор только на волне
+  }
   ed.pos = t;
   if(player && isFinite(player.duration)) player.currentTime = t;
-  draw();
+  refresh();
+}
+waveCanvas.addEventListener("mousedown", onScaleMouseDown);
+stripCanvas.addEventListener("mousedown", onScaleMouseDown);
+
+document.addEventListener("mousemove", e=>{
+  if(!panDrag || !ed) return;
+  const dt = -(e.clientX - panDrag.startX) / W() * (panDrag.startB - panDrag.startA);
+  clampView(panDrag.startA + dt, panDrag.startB + dt);
+  refresh(); scheduleStrip();
+});
+document.addEventListener("mouseup", ()=>{
+  if(!panDrag) return;
+  panDrag = null;
+  setPanCursor(shiftHeld ? "grab" : "");
 });
 
-// зум колёсиком вокруг курсора
+// зум колёсиком вокруг курсора; Shift+колесо — панорамирование той же длины
+// окна (вверх — влево, вниз — вправо), а не зум.
 function zoomAt(clientX, deltaY){
   if(!ed) return;
   const rect = waveCanvas.getBoundingClientRect();
@@ -780,17 +909,52 @@ function zoomAt(clientX, deltaY){
   const minLen = Math.max(0.2, 4 * frameStep());
   const factor = deltaY > 0 ? 1.25 : 0.8;
   let len = clamp(vlen() * factor, minLen, ed.duration);
-  let a = tc - (x/W())*len, b = a + len;
-  if(a < 0){ b -= a; a = 0; }
-  if(b > ed.duration){ a -= (b - ed.duration); b = ed.duration; }
-  view.a = Math.max(0, a); view.b = Math.min(ed.duration, b);
+  clampView(tc - (x/W())*len, tc - (x/W())*len + len);
+  refresh(); scheduleStrip();
+}
+function panAt(deltaY){
+  if(!ed) return;
+  const step = vlen() * 0.2 * (deltaY > 0 ? 1 : -1);
+  clampView(view.a + step, view.b + step);
   refresh(); scheduleStrip();
 }
 [waveCanvas, stripCanvas].forEach(cv=>
-  cv.addEventListener("wheel", e=>{ e.preventDefault(); zoomAt(e.clientX, e.deltaY); }, {passive:false}));
+  cv.addEventListener("wheel", e=>{
+    e.preventDefault();
+    if(e.shiftKey) panAt(e.deltaY); else zoomAt(e.clientX, e.deltaY);
+  }, {passive:false}));
 $("waveWrap").addEventListener("dblclick", ()=>{ if(ed){ view={a:0,b:ed.duration}; refresh(); scheduleStrip(); } });
 
-window.addEventListener("resize", ()=>{ if(ed){ fitCanvas(); refresh(); } });
+window.addEventListener("resize", ()=>{ if(ed){ fitCanvas(); refresh(); updateHelpPanelWidth(); } });
+
+// ============ Панель подсказок ============
+// Ширина: по умолчанию/максимум HELP_MAX_W; если между сайдбаром и редактором
+// меньше места — сжимается до HELP_MIN_W; если и этого не хватает — остаётся
+// HELP_MIN_W и выезжает поверх сайдбара (см. .help-panel z-index в <style>).
+const HELP_MAX_W = 300, HELP_MIN_W = 240, HELP_GAP = 16;
+function updateHelpPanelWidth(){
+  const railEl = document.querySelector(".rail"), editorEl = $("editor");
+  if(!railEl || !editorEl) return;
+  const available = editorEl.getBoundingClientRect().left - railEl.getBoundingClientRect().right;
+  let w;
+  if(available >= HELP_MAX_W + HELP_GAP) w = HELP_MAX_W;
+  else if(available >= HELP_MIN_W + HELP_GAP) w = available - HELP_GAP;
+  else w = HELP_MIN_W;
+  $("helpPanel").style.setProperty("--help-w", w + "px");
+}
+
+$("helpHandle").addEventListener("click", ()=>{
+  $("helpPanel").classList.toggle("open");
+});
+
+// Подсказку у «?» показываем на 3-5с при каждом появлении редактора (без
+// запоминания — не раздражает благодаря приглушённой прозрачности).
+function flashHelpTip(){
+  const tip = $("helpTip");
+  tip.classList.add("auto-show");
+  clearTimeout(tip._t);
+  tip._t = setTimeout(()=> tip.classList.remove("auto-show"), 4000);
+}
 
 // ============ Плеер ============
 let stopAt = null;

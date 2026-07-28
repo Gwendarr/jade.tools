@@ -106,8 +106,14 @@ def api_paths_status():
 @app.route("/api/deps/info")
 def api_deps_info():
     """Статус/ссылки/команды по группам зависимостей (yt-dlp, ffmpeg+ffprobe,
-    Deno) — для окна установки (варианты 2/3) и раздела настроек."""
-    return jsonify({"bin_dir": str(core.BIN_DIR), "groups": core.dependency_groups()})
+    Deno) — для окна установки (варианты 2/3) и раздела настроек.
+    active_job — id уже идущей автоустановки, если она есть: окно установки
+    при открытии переподключается к её прогрессу вместо показа кнопки «начать»
+    (защита от повторного параллельного запуска — см. core.start_install_job)."""
+    with core.JOBS_LOCK:
+        active_job, _ = core.active_install_job()
+    return jsonify({"bin_dir": str(core.BIN_DIR), "groups": core.dependency_groups(),
+                    "active_job": active_job})
 
 
 @app.route("/api/deps/install", methods=["POST"])
@@ -138,6 +144,8 @@ def api_status(job_id):
             "progress": round(job["progress"], 1),
             "speed": job["speed"],
             "eta": job["eta"],
+            "downloaded_mb": round(job["downloaded_mb"], 1),
+            "total_mb": round(job["total_mb"], 1),
             "stage": job.get("stage", ""),
             "title": job["title"],
             "download_name": job["download_name"],

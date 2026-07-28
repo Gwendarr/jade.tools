@@ -361,6 +361,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
             <span id="imProgPct">0%</span>
             <span id="imProgStage"></span>
           </div>
+          <div class="prog-line" id="imProgDetail"></div>
           <div style="margin-top:12px;display:flex;gap:10px">
             <button class="ghost" id="imAutoCancelBtn">отменить</button>
             <button class="hidden" id="imAutoCloseBtn" style="width:100%">закрыть</button>
@@ -422,6 +423,18 @@ document.addEventListener("DOMContentLoaded", ()=>{
         const info = await (await fetch("/api/deps/info")).json();
         im.groups = info.groups || {};
         im.binDir = info.bin_dir || "";
+        if(info.active_job){
+          // Установка уже идёт (например, окно закрыли и открыли заново) —
+          // переподключаемся к её прогрессу, а не показываем кнопку «начать».
+          im.job = info.active_job;
+          g("imAutoStart").classList.add("hidden");
+          g("imAutoProgress").classList.remove("hidden");
+          g("imAutoCancelBtn").classList.remove("hidden");
+          g("imAutoCloseBtn").classList.add("hidden");
+          g("imAutoMsg").innerHTML = "";
+          imShowView("imAuto");
+          imPollInstall();
+        }
       }catch(e){ im.groups = {}; }
     };
 
@@ -429,7 +442,6 @@ document.addEventListener("DOMContentLoaded", ()=>{
       g("installModal").classList.remove("show");
       imStopPoll();
     }
-    g("installModal").addEventListener("click", e=>{ if(e.target.id === "installModal") closeInstallModal(); });
     g("imCloseBtn").addEventListener("click", closeInstallModal);
     document.querySelectorAll("#installModal [data-back]").forEach(b=>
       b.addEventListener("click", ()=> imShowView("imList")));
@@ -519,6 +531,9 @@ document.addEventListener("DOMContentLoaded", ()=>{
         g("imBarFill").style.width = pct + "%";
         g("imProgPct").textContent = (Math.round(pct*10)/10) + "%";
         g("imProgStage").textContent = s.stage || "";
+        const sizePart = s.total_mb ? `${(s.downloaded_mb||0).toFixed(1)} / ${s.total_mb.toFixed(1)} МБ` : "";
+        g("imProgDetail").textContent = [s.speed, s.eta ? "осталось "+s.eta : "", sizePart]
+          .filter(Boolean).join("  ·  ");
         if(s.status === "done"){
           imFinish('<div class="msg ok">Готово — зависимости установлены, можно продолжить.</div>');
         }else if(s.status === "error"){

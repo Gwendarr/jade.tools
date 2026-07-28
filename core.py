@@ -774,6 +774,8 @@ def new_job(initial=None):
         "progress": 0.0,        # 0..100
         "speed": "",
         "eta": "",
+        "downloaded_mb": 0.0,    # для задач с известным Content-Length (установка зависимостей)
+        "total_mb": 0.0,
         "stage": "",            # текстовая подсказка о текущем этапе
         "title": "",
         "filename": "",         # итоговый путь к файлу на диске
@@ -1283,19 +1285,37 @@ def _find_asset(release, asset_name):
     return None
 
 
+def _fmt_eta(seconds):
+    """123.4 -> '2:03' / '1:02:03'. Пустая строка, если не посчитать (нет
+    ещё данных о скорости)."""
+    if seconds is None or seconds < 0:
+        return ""
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
 def _download_with_progress(url, dest_path, job, base=0.0, span=100.0):
-    """Скачивает url в dest_path кусками по 256 КБ, обновляя job['progress'] в
-    диапазоне [base, base+span] по мере получения байт (Content-Length).
+    """Скачивает url в dest_path кусками по 256 КБ потоковой записью на диск
+    (весь файл разом в память не грузится), обновляя job['progress'] в
+    диапазоне [base, base+span] по мере получения байт (Content-Length), а
+    также job['speed'], job['eta'], job['downloaded_mb']/['total_mb'] — не
+    чаще раза в 0.5с, чтобы не считать скорость по каждому куску 256 КБ.
     Проверяет отмену (job['status']=='canceled') на каждом куске — этого
     достаточно, чтобы POST /api/cancel/<job_id> сработал без специальной
     поддержки скачивания (в отличие от subprocess, тут нет job['proc'] для
     terminate(), поэтому останавливаемся сами). Возвращает "" при успехе, иначе
     текст ошибки; на отмену/ошибку недокачанный файл удаляется."""
+    t0 = time.monotonic()
+    done = 0
+    total = 0
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "jade.tools"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             total = int(resp.headers.get("Content-Length") or 0)
-            done = 0
+            job["total_mb"] = total / (1024 * 1024)
+            last_update = 0.0
             with open(dest_path, "wb") as f:
                 while True:
                     if job.get("status") == "canceled":
@@ -1307,6 +1327,22 @@ def _download_with_progress(url, dest_path, job, base=0.0, span=100.0):
                     done += len(chunk)
                     if total:
                         job["progress"] = base + span * min(1.0, done / total)
+                    now = time.monotonic()
+                    if now - last_update >= 0.5:
+                        last_update = now
+                        elapsed = now - t0
+                        job["downloaded_mb"] = done / (1024 * 1024)
+                        if elapsed > 0.2:
+                            speed_bps = done / elapsed
+                            job["speed"] = f"{speed_bps / (1024 * 1024):.1f} МБ/с"
+                            if total and speed_bps > 0:
+                                job["eta"] = _fmt_eta((total - done) / speed_bps)
+        job["downloaded_mb"] = done / (1024 * 1024)
+        job["eta"] = ""
+        elapsed = time.monotonic() - t0
+        avg_speed = (done / (1024 * 1024)) / elapsed if elapsed > 0 else 0.0
+        logger.info("Установка зависимостей: скачано %s (%.1f МБ за %.1fс, ~%.1f МБ/с)",
+                    url, done / (1024 * 1024), elapsed, avg_speed)
         return ""
     except Exception as e:
         return str(e)
@@ -1374,10 +1410,12 @@ def _install_deno(job, base, span, work_dir):
         zip_path.unlink(missing_ok=True)
         return err
     job["stage"] = "Deno — извлечение deno.exe…"
+    t0 = time.monotonic()
     try:
         extracted = _extract_zip_members(zip_path, {"deno.exe": "deno.exe"}, BIN_DIR)
     finally:
         zip_path.unlink(missing_ok=True)
+    logger.info("Установка зависимостей: Deno — извлечение заняло %.1fс", time.monotonic() - t0)
     if "deno.exe" not in extracted:
         return "В архиве Deno не найден deno.exe — формат релиза мог измениться."
     job["progress"] = base + span
@@ -1405,11 +1443,13 @@ def _install_ffmpeg(job, base, span, work_dir):
     # НЕ распаковываем весь архив (~427 МБ, плюс лишний ffplay.exe) — только
     # эти два файла, откуда бы внутри архива они ни лежали.
     job["stage"] = "ffmpeg — точечное извлечение ffmpeg.exe/ffprobe.exe…"
+    t0 = time.monotonic()
     try:
         extracted = _extract_zip_members(
             zip_path, {"ffmpeg.exe": "ffmpeg.exe", "ffprobe.exe": "ffprobe.exe"}, BIN_DIR)
     finally:
         zip_path.unlink(missing_ok=True)
+    logger.info("Установка зависимостей: ffmpeg — извлечение заняло %.1fс", time.monotonic() - t0)
     missing = {"ffmpeg.exe", "ffprobe.exe"} - extracted
     if missing:
         return (f"В архиве ffmpeg не найдены: {', '.join(sorted(missing))} — "
@@ -1433,6 +1473,10 @@ def _install_dependencies_thread(job_id, job, targets):
             base = i * span
             job["progress"] = base
             job["stage"] = f"{_DEP_LABELS.get(name, name)} — скачивание ({i + 1} из {n})…"
+            job["speed"] = ""
+            job["eta"] = ""
+            job["downloaded_mb"] = 0.0
+            job["total_mb"] = 0.0
             err = _INSTALLERS[name](job, base, span, work)
             if job["status"] == "canceled":
                 break
@@ -1459,18 +1503,36 @@ def _install_dependencies_thread(job_id, job, targets):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def active_install_job():
+    """(job_id, job) уже идущей задачи установки зависимостей, или (None, None).
+    Вызывать под JOBS_LOCK."""
+    for jid, job in JOBS.items():
+        if job.get("kind") == "install" and job["status"] in _ACTIVE_STATUSES:
+            return jid, job
+    return None, None
+
+
 def start_install_job(targets):
     """Запускает фоновую установку зависимостей в bin/ (окно установки,
     вариант 1). targets — подмножество {"yt-dlp","ffmpeg","deno"} (ffmpeg тянет
     за собой и ffprobe — общий релиз). Возвращает job_id или None, если после
-    фильтрации целей не осталось."""
+    фильтрации целей не осталось.
+
+    Если установка уже идёт (например, окно установки открыли повторно и
+    снова нажали «начать») — НЕ запускает вторую параллельную установку (риск
+    гонки при записи в bin/), а отдаёт job_id уже идущей задачи, чтобы фронт
+    переподключился к её прогрессу."""
     targets = [t for t in targets if t in _INSTALLERS]
     if not targets:
         return None
-    job_id = uuid.uuid4().hex[:12]
     with JOBS_LOCK:
+        existing_id, _ = active_install_job()
+        if existing_id:
+            logger.info("Установка зависимостей: уже идёт (job %s) — повторный запуск пропущен", existing_id)
+            return existing_id
         cleanup_old_jobs()
-        job = new_job({"status": "downloading", "progress": 0.0,
+        job_id = uuid.uuid4().hex[:12]
+        job = new_job({"status": "downloading", "progress": 0.0, "kind": "install",
                        "title": "Установка зависимостей", "stage": "Подготовка…"})
         JOBS[job_id] = job
     t = threading.Thread(target=_install_dependencies_thread,
