@@ -394,6 +394,13 @@ def _rate_limit_arg():
 # самом, его подпапках и Profiles/*/, что соответствует реальной раскладке).
 _FIREFOX_FORK_APPDATA = {"librewolf": "LibreWolf", "waterfox": "Waterfox", "zen": "zen"}
 
+# Отображаемые названия браузеров (для текста ошибок) — та же капитализация,
+# что в дропдауне настроек (templates/settings.html).
+_COOKIE_BROWSER_LABELS = {
+    "firefox": "Firefox", "librewolf": "LibreWolf",
+    "waterfox": "Waterfox", "zen": "Zen",
+}
+
 
 def _resolve_cookies_browser_spec(browser_key):
     """Значение для --cookies-from-browser по выбору в настройках."""
@@ -1006,9 +1013,28 @@ def friendly_ytdlp_error(stderr):
                 "Python-модуль mutagen: py -m pip install mutagen. Либо "
                 "выключите «встраивать обложку и метаданные» в настройках.")
     if "confirm you" in low and "bot" in low:
-        return ("YouTube требует подтвердить, что вы не бот. Включите "
-                "«использовать cookies» в настройках (раздел «Пути») — см. "
-                "README, раздел «Cookies и доступ к YouTube».")
+        settings = get_settings()
+        if not settings.get("use_cookies"):
+            return ("YouTube требует подтвердить, что вы не бот. Включите "
+                    "«использовать cookies» в настройках (раздел «Пути») — см. "
+                    "README, раздел «Cookies и доступ к YouTube».")
+        if settings.get("cookies_from_browser"):
+            browser_key = _normalize_cookies_browser(settings.get("cookies_browser"))
+            browser_label = _COOKIE_BROWSER_LABELS.get(browser_key, "браузере")
+            return (f"YouTube отклонил переданные cookies и требует подтвердить, "
+                    f"что вы не бот. Вероятно, сессия в {browser_label} устарела "
+                    f"или была отозвана (YouTube периодически ротирует токены "
+                    f"безопасности — это не связано с настройками приложения). "
+                    f"Зайдите на youtube.com в {browser_label} и убедитесь, что "
+                    f"вход в аккаунт всё ещё активен, при необходимости "
+                    f"перелогиньтесь и повторите.")
+        return ("YouTube отклонил переданные cookies и требует подтвердить, что "
+                "вы не бот. Вероятно, сессия в файле cookies.txt устарела или "
+                "была отозвана (YouTube периодически ротирует токены "
+                "безопасности — это не связано с настройками приложения). "
+                "Зайдите на youtube.com в браузере, где экспортировали "
+                "cookies.txt, убедитесь, что вход в аккаунт всё ещё активен, и "
+                "переэкспортируйте файл заново.")
     if ("signature solving failed" in low or "n challenge" in low
             or "only images are available" in low
             or "requested format is not available" in low):
