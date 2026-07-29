@@ -16,7 +16,9 @@ settings.json
 # Инструменты разработки / чистый экспорт
 .claude/
 _clean_export/
+_release_staging/
 jade.tools_*.zip
 
 CLAUDE.md
 make_clean_zip.bat
+make_release_zip.bat
