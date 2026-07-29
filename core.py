@@ -19,8 +19,10 @@ import hashlib
 import logging
 import tempfile
 import zipfile
+import datetime
 import threading
 import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -109,6 +111,59 @@ logger.info("jade.tools: логирование запущено (pid=%s, фай
 SETTINGS_FILE = BASE_DIR / "settings.json"
 
 
+# --- Версия приложения: разбор и сравнение -----------------------------------
+# Формат: "x.ddmmyy" (x — номер релиза на GitHub, ddmmyy — день/месяц/две
+# последние цифры года; например "1.220726"), опционально с префиксом v/V
+# (так проставляются теги на GitHub). Одна функция для обеих задач ниже:
+# отслеживания смены версии между запусками и сверки с последним релизом на
+# GitHub — обеим нужно одно и то же: распарсить строку в сравнимую величину и
+# ни в коем случае не упасть на кривом значении.
+#
+# Хотфиксы (x.ddmmyy-n) сейчас НЕ поддерживаются. Когда понадобятся —
+# добавлять только здесь: доп. группу в _VERSION_RE и третий элемент кортежа
+# в parse_version(); compare_versions() ниже сравнивает кортежи целиком и сам
+# учтёт новый компонент, её трогать не придётся.
+_VERSION_RE = re.compile(r'^[vV]?(\d+)\.(\d{2})(\d{2})(\d{2})$')
+
+
+def parse_version(value):
+    """Разбирает строку версии "x.ddmmyy" (опц. префикс v/V, пробелы по краям
+    игнорируются) в (release:int, released:datetime.date) для сравнения.
+
+    Возвращает None, если строка не соответствует формату ИЛИ дата не
+    существует (невалидные день/месяц, например "32.999999") — разбор сам
+    валидирует значение, посимвольно/полями строки не сравниваем. Ошибка
+    разбора никогда не бросается наружу — вызывающий код проверяет None."""
+    if not value:
+        return None
+    m = _VERSION_RE.match(value.strip())
+    if not m:
+        return None
+    release_s, dd, mm, yy = m.groups()
+    try:
+        released = datetime.date(2000 + int(yy), int(mm), int(dd))
+    except ValueError:
+        return None
+    return (int(release_s), released)
+
+
+def compare_versions(a, b):
+    """Сравнивает версии a и b (строки "x.ddmmyy") через parse_version():
+    сначала по релизу (x), при равенстве — по дате.
+
+    Возвращает -1 (a < b) / 0 (a == b) / 1 (a > b), либо None, если хотя бы
+    одна строка не распарсилась — "сравнение невозможно"; вызывающий код
+    обязан трактовать None как "изменений/обновления нет", не как ошибку."""
+    pa, pb = parse_version(a), parse_version(b)
+    if pa is None or pb is None:
+        return None
+    if pa < pb:
+        return -1
+    if pa > pb:
+        return 1
+    return 0
+
+
 # --- Пути temp/cache: три режима (app|system|custom) --------------------------
 # Чистые резолверы пути — БЕЗ побочных эффектов (не создают папку!). Кто хочет
 # папку реально на диске — создаёт сам (см. apply_settings() и _dir_available()
@@ -156,6 +211,13 @@ def _dir_available(path):
 
 
 DEFAULT_SETTINGS = {
+    # Раздел 0 — приложение (блок в settings.html НАД «предпочтения скачивания»)
+    "check_app_updates": True,      # фоновая проверка новых релизов на GitHub
+                                     # (см. check_app_update/start_app_update_check);
+                                     # выкл — проверка вообще не выполняется, не
+                                     # только скрывает плашку. НЕ влияет на
+                                     # last_seen_version (отслеживание смены
+                                     # версии между запусками работает всегда).
     # Раздел 1 — предпочтения скачивания
     "video_ext": "original",        # original|mp4|mov|webm|mkv
     "audio_ext": "mp3",             # mp3|wav|aac|opus
@@ -179,6 +241,9 @@ DEFAULT_SETTINGS = {
     "cookies_from_browser": True,   # вложенный тумблер, значим только при use_cookies=True
     "cookies_browser": "firefox",   # firefox|librewolf|waterfox|zen — ТОЛЬКО Gecko, см. README
     "cookies_file_path": "",        # состояние 3: ручной cookies.txt
+    "last_seen_version": "",        # версия прошлого запуска (x.ddmmyy), см.
+                                     # version_change_status()/mark_version_seen();
+                                     # "" — ещё ни разу не запускалось
 }
 
 _settings = dict(DEFAULT_SETTINGS)
@@ -348,6 +413,180 @@ def save_settings(partial):
     apply_settings()
     logger.info("Настройки обновлены: %s", partial)
     return s
+
+
+# --- Версия приложения: смена между запусками --------------------------------
+# Changelog пока не реализован (сейчас нужны только сами механизмы) — здесь
+# только вычисляем факт смены версии и пишем его в лог, ничего не показываем.
+_VERSION_CHANGE = {"changed": False, "from": "", "to": ""}
+
+
+def _compute_version_change():
+    """Сравнивает last_seen_version (settings.json) с текущей
+    tools.settings.VERSION_NUMBER через compare_versions() и записывает
+    результат в _VERSION_CHANGE + в лог. Ничего не сохраняет — только
+    вычисляет; см. mark_version_seen() для записи текущей версии как увиденной.
+
+    Локальный импорт tools.settings — на уровне модуля core.py импортировать
+    нельзя (tools.settings сам импортирует core, будет цикл)."""
+    global _VERSION_CHANGE
+    from tools.settings import VERSION_NUMBER
+    previous = (_settings.get("last_seen_version") or "").strip()
+    current = VERSION_NUMBER
+
+    if not previous:
+        # Первый запуск — сравнивать не с чем, сменой версии не считается.
+        _VERSION_CHANGE = {"changed": False, "from": "", "to": current}
+        logger.info("Версия приложения: первый запуск (%s).", current)
+        return
+
+    cmp = compare_versions(previous, current)
+    if cmp is None:
+        # Не смогли распарсить одну из версий — ведём себя как при отсутствии
+        # смены (см. требование к parse_version/compare_versions), но факт
+        # фиксируем в логе.
+        _VERSION_CHANGE = {"changed": False, "from": previous, "to": current}
+        logger.info(
+            "Версия приложения: не удалось сравнить %r и %r — считаем, что "
+            "версия не менялась.", previous, current)
+        return
+
+    changed = cmp != 0   # включая откат на более старую версию (cmp > 0)
+    _VERSION_CHANGE = {"changed": changed, "from": previous, "to": current}
+    if changed:
+        logger.info("Версия приложения сменилась: %s -> %s", previous, current)
+    else:
+        logger.info("Версия приложения не менялась (%s).", current)
+
+
+def version_change_status():
+    """{"changed": bool, "from": str, "to": str} — результат последнего вызова
+    _compute_version_change(). changed=True — last_seen_version отличается от
+    текущей VERSION_NUMBER в любую сторону (в т.ч. откат на старую версию)."""
+    return dict(_VERSION_CHANGE)
+
+
+def mark_version_seen():
+    """Записывает текущую VERSION_NUMBER в last_seen_version (settings.json).
+    Одно поле, без отдельного флага "changelog просмотрен": совпадение
+    last_seen_version с текущей версией само по себе означает, что для неё
+    уже всё показано — два поля рассинхронились бы.
+
+    Сейчас вызывается сразу при старте (см. check_version_change_at_startup).
+    Когда появится окно changelog — вызов нужно будет убрать из старта и
+    перенести на момент, когда пользователь закроет это окно; искать вызов
+    можно будет по этому докстрингу."""
+    from tools.settings import VERSION_NUMBER
+    save_settings({"last_seen_version": VERSION_NUMBER})
+
+
+def check_version_change_at_startup():
+    """Точка входа, вызываемая один раз при старте приложения (app.py):
+    вычисляет смену версии (_compute_version_change) и сразу же отмечает
+    текущую версию увиденной (mark_version_seen). Обе половины идут подряд,
+    ПОКА нет окна changelog — см. докстринг mark_version_seen() про то, что
+    изменится, когда оно появится."""
+    _compute_version_change()
+    mark_version_seen()
+
+
+# --- Версия приложения: проверка релизов на GitHub ---------------------------
+# Тот же кэш-паттерн (ts/result + TTL), что у check_ytdlp_update() ниже, но
+# свой отдельный кэш — это разные проверки разных репозиториев/эндпоинтов.
+_APP_UPDATE_CACHE_TTL = 1800   # с — как у yt-dlp: не дёргать GitHub API чаще
+_app_update_cache = {"ts": 0.0, "result": None}
+_APP_RELEASES_LATEST_URL = "https://api.github.com/repos/Gwendarr/jade.tools/releases/latest"
+
+
+def check_app_update(force=False):
+    """Сравнить текущую версию приложения (tools.settings.VERSION_NUMBER) с
+    последним ОПУБЛИКОВАННЫМ релизом на GitHub — releases/latest сам
+    игнорирует черновики и предрелизы. Результат кэшируется на
+    _APP_UPDATE_CACHE_TTL секунд (если force=False).
+
+    Настройка check_app_updates=False отключает проверку целиком — функция
+    возвращает status="disabled" СРАЗУ, до чтения кэша и до похода в сеть, и
+    не трогает кэш: при повторном включении разрешён тот же кэш ~30 минут,
+    что и обычно (если TTL с последней реальной проверки ещё не истёк —
+    вернётся он, а не свежий запрос). НЕ влияет на last_seen_version.
+
+    Возвращает {status: "available"|"up_to_date"|"error"|"disabled", current,
+    latest}. status="available" — единственное, что должен показывать фронт
+    (см. templates/_base.html); всё остальное фронт молча игнорирует.
+
+    Любая проблема тихо трактуется как «обновлений нет», без исключения
+    наружу и без сообщения пользователю — только лог:
+      * нет сети / таймаут;
+      * 404 — либо репозиторий приватный, либо релизов ещё не публиковали
+        (сейчас верно и то и другое, это ожидаемое состояние, не ошибка);
+      * лимит запросов GitHub (403/429);
+      * тег не распознан parse_version() (compare_versions() вернул None)."""
+    if not get_settings().get("check_app_updates", True):
+        return {"status": "disabled", "current": "", "latest": ""}
+
+    now = time.time()
+    cached = _app_update_cache["result"]
+    if not force and cached and now - _app_update_cache["ts"] < _APP_UPDATE_CACHE_TTL:
+        return cached
+
+    from tools.settings import VERSION_NUMBER
+    current = VERSION_NUMBER
+
+    try:
+        req = urllib.request.Request(
+            _APP_RELEASES_LATEST_URL, headers={"User-Agent": "jade.tools"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        latest = (data.get("tag_name") or "").strip()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            logger.info("Проверка версии приложения: релизов на GitHub пока "
+                       "нет (или репозиторий приватный) — 404.")
+        else:
+            logger.warning("Проверка версии приложения не удалась: HTTP %s", e.code)
+        result = {"status": "error", "current": current, "latest": ""}
+        _app_update_cache.update(ts=now, result=result)
+        return result
+    except Exception as e:
+        logger.warning("Проверка версии приложения не удалась: %s", e)
+        result = {"status": "error", "current": current, "latest": ""}
+        _app_update_cache.update(ts=now, result=result)
+        return result
+
+    cmp = compare_versions(latest, current)
+    if cmp is None:
+        logger.info("Проверка версии приложения: тег %r не распознан.", latest)
+        result = {"status": "error", "current": current, "latest": latest}
+    elif cmp > 0:
+        result = {"status": "available", "current": current, "latest": latest}
+        logger.info("jade.tools: доступна новая версия %s (у вас %s)", latest, current)
+    else:
+        result = {"status": "up_to_date", "current": current, "latest": latest}
+    _app_update_cache.update(ts=now, result=result)
+    return result
+
+
+def start_app_update_check():
+    """Запускает check_app_update() в фоновом потоке — не блокирует старт
+    сервера и открытие браузера (тот же принцип, что у start_janitor()).
+    Результат кэшируется и отдаётся фронту по требованию
+    (см. app.py: GET /api/app_update_check).
+
+    check_app_updates=False — поток вообще не стартует (не просто игнорирует
+    результат): при выключенной настройке приложение ни разу не обращается
+    к GitHub. Повторный вызов не нужен — после включения обратно проверка
+    возобновляется сама, как только что-то дёрнет check_app_update() (см. её
+    докстринг про тот же кэш ~30 минут)."""
+    if not get_settings().get("check_app_updates", True):
+        logger.info("Проверка обновлений приложения отключена в настройках — "
+                   "фоновая проверка при старте не выполняется.")
+        return
+    def _run():
+        try:
+            check_app_update()
+        except Exception:
+            pass
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def reset_settings():

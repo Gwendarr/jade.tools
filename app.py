@@ -66,6 +66,16 @@ app.register_blueprint(_settings_tool.bp)
 # `py app.py`, и при запуске из трея (tray_app импортирует этот модуль).
 core.start_janitor()
 
+# Смена версии между запусками — сравнение с last_seen_version и запись
+# текущей версии как увиденной (changelog пока не показываем, см. докстринг
+# core.mark_version_seen). Синхронно (не сеть, просто сравнение строк) — не
+# задерживает старт.
+core.check_version_change_at_startup()
+
+# Проверка новых релизов на GitHub — в фоновом потоке, чтобы не задерживать
+# старт сервера и открытие браузера (см. core.start_app_update_check).
+core.start_app_update_check()
+
 
 # --- Лендинг -----------------------------------------------------------------
 
@@ -81,6 +91,15 @@ def api_ytdlp_update_check():
     """Автоматическая проверка при открытии главной страницы (кэшируется на
     стороне core.check_ytdlp_update, чтобы не дёргать GitHub на каждый заход)."""
     return jsonify(core.check_ytdlp_update())
+
+
+@app.route("/api/app_update_check")
+def api_app_update_check():
+    """Плашка «доступна новая версия» у кнопки GitHub (_base.html, все
+    страницы). Результат уже посчитан фоновым потоком при старте
+    (core.start_app_update_check) и лежит в кэше check_app_update — обычный
+    запрос почти всегда просто читает его, не дёргая GitHub заново."""
+    return jsonify(core.check_app_update())
 
 
 @app.route("/api/ytdlp_update_do", methods=["POST"])

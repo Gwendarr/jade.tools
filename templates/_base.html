@@ -240,6 +240,19 @@
   .gh-fab .gh-icon-light{display:none}
   [data-theme="light"] .gh-fab .gh-icon-dark{display:none}
   [data-theme="light"] .gh-fab .gh-icon-light{display:block}
+
+  /* Плашка «доступна новая версия» — слева от .gh-fab (эта кнопка ведёт в
+     репозиторий), только визуальный указатель на неё. Сама НЕ кликабельна
+     (pointer-events:none — переход делает соседняя кнопка GitHub) и НЕ
+     показывается, пока JS не подтвердит наличие обновления (см. скрипт у
+     .gh-fab ниже). right:74px = 20 (отступ .gh-fab) + 44 (её ширина) +
+     10 (зазор) — плашка не наезжает на кнопку. */
+  .app-update-badge{position:fixed;right:74px;bottom:20px;z-index:40;
+          display:none;align-items:center;gap:4px;pointer-events:none;
+          background:var(--surface);border:1px solid var(--line);
+          border-radius:999px;padding:0 14px;height:44px;white-space:nowrap;
+          font-size:12px;color:var(--text)}
+  .app-update-badge.show{display:flex}
 </style>
 <script>
 // Набор Lucide-иконок (lucide.dev, ISC). Используются как window.ICONS.name
@@ -320,6 +333,26 @@ document.addEventListener("DOMContentLoaded", ()=>{
       <defs><clipPath id="gh_fab_clip_light"><rect width="98" height="96" fill="white"/></clipPath></defs>
     </svg>
   </a>
+
+  <!-- Плашка «доступна новая версия» — не кнопка и не ссылка: "›" тут чисто
+       визуальный указатель на .gh-fab рядом, обработчика на ней нет и не
+       нужен (переход делает сама кнопка GitHub). Показывается на всех
+       страницах, только если фоновая проверка (core.check_app_update, см.
+       app.py: core.start_app_update_check + GET /api/app_update_check)
+       реально нашла версию новее текущей. -->
+  <div class="app-update-badge" id="appUpdateBadge">
+    <span>доступна новая версия</span><span aria-hidden="true">›</span>
+  </div>
+  <script>
+  (function(){
+    "use strict";
+    fetch("/api/app_update_check").then(r=>r.json()).then(d=>{
+      if(d && d.status === "available"){
+        document.getElementById("appUpdateBadge").classList.add("show");
+      }
+    }).catch(()=>{});
+  })();
+  </script>
 
   {% if running_from_temp %}
   <!-- Запуск из временной папки Windows (onedir, часть 2) — БЛОКИРУЮЩАЯ
