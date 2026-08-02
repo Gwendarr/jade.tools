@@ -13,10 +13,12 @@ Flask-сервер, который:
 """
 
 import os
+import random
 import signal
 import threading
+from urllib.parse import urlparse
 
-from flask import Flask, render_template, jsonify, send_file, abort, request
+from flask import Flask, render_template, jsonify, send_file, abort, request, redirect, url_for
 
 import core
 import tools
@@ -60,6 +62,32 @@ for _bp in tools.blueprints():
 # Страница настроек — отдельный раздел (не инструмент-плитка на лендинге).
 import tools.settings as _settings_tool
 app.register_blueprint(_settings_tool.bp)
+
+# Отдельная страница вне общей навигации (не инструмент-плитка) — см. tools/rq7.py.
+import tools.rq7 as _rq7_page
+app.register_blueprint(_rq7_page.bp)
+
+
+# При каждом переходе между страницами инструментов (в любую сторону) — шанс
+# 1 из 50 попасть на _rq7_page вместо запрошенного инструмента. Секретность —
+# см. tools/rq7.py и templates/rq7.html: сама вероятность не секрет, но её
+# нет смысла тратить на переходы не между инструментами (лендинг/настройки).
+# После core.get_settings()["seen"] == True — не срабатывает никогда.
+@app.before_request
+def _maybe_tool_transition_easter_egg():
+    if request.method != "GET":
+        return None
+    tool_paths = {t["url"] for t in tools.tools()}
+    if request.path not in tool_paths:
+        return None
+    if core.get_settings().get("seen"):
+        return None
+    ref_path = urlparse(request.referrer or "").path
+    if ref_path not in tool_paths or ref_path == request.path:
+        return None
+    if random.random() < 1 / 50:
+        return redirect(url_for("rq7.page"))
+    return None
 
 # Фоновый уборщик downloads/: чистит остатки прошлых запусков и удаляет
 # отлежавшиеся задачи. Запускаем на уровне модуля, чтобы работало и при

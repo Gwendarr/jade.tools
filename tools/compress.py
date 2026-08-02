@@ -95,7 +95,16 @@ def _compress_thread(job_id, job):
     try:
         # 1. Получить исходный файл (с диска или скачать с YouTube).
         src = job.get("src_path")
+        if src and not Path(src).is_file():
+            # Исходник пропал (например, автоочистка добралась до старой
+            # задачи) — если это ссылка, перекачиваем заново вместо ошибки.
+            src = None
+            job["src_path"] = ""
         if not src:
+            if not job.get("url"):
+                job["status"] = "error"
+                job["error"] = "Исходный файл недоступен. Загрузите видео заново."
+                return
             job["status"] = "downloading"
             job["stage"] = "Скачивание исходного видео…"
             job["progress"] = 0.0
@@ -153,7 +162,9 @@ def _compress_thread(job_id, job):
                           "-f", "null", os.devnull],
                 job, duration, base=0.0, span=50.0)
             if job["status"] == "canceled":
-                shutil.rmtree(work, ignore_errors=True)
+                # Чистим только результат прохода, не исходник — задачу можно
+                # будет запустить заново с другими настройками.
+                core.clear_work_dir(work)
                 return
             if rc != 0:
                 job["status"] = "error"
@@ -168,7 +179,7 @@ def _compress_thread(job_id, job):
                           "-movflags", "+faststart", str(out)],
                 job, duration, base=50.0, span=50.0)
             if job["status"] == "canceled":
-                shutil.rmtree(work, ignore_errors=True)
+                core.clear_work_dir(work)
                 return
             if rc != 0:
                 job["status"] = "error"
@@ -191,7 +202,7 @@ def _compress_thread(job_id, job):
                           "-movflags", "+faststart", str(out)],
                 job, duration, base=0.0, span=100.0)
             if job["status"] == "canceled":
-                shutil.rmtree(work, ignore_errors=True)
+                core.clear_work_dir(work)
                 return
             if rc != 0:
                 job["status"] = "error"

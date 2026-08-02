@@ -1,6 +1,7 @@
 # Сборка
 dist/
 build/
+releases/
 __pycache__/
 *.pyc
 

@@ -617,8 +617,7 @@ def api_prepare():
         if job["status"] in ("downloading", "processing"):
             return jsonify({"error": "Уже выполняется."}), 409
         url = job["url"]
-        job.update({"status": "pending", "progress": 0.0, "error": "",
-                    "cleanup_at": None})
+        job.update({"status": "pending", "progress": 0.0, "error": ""})
 
     t = threading.Thread(target=_prepare_thread,
                          args=(job_id, job, url, height), daemon=True)
@@ -769,7 +768,6 @@ def api_start():
         job.update({
             "status": "pending", "progress": 0.0, "error": "", "stage": "",
             "filename": "", "download_name": "", "result_size_mb": None,
-            "cleanup_at": None,
             "start": start, "end": end,
             "out_mode": out_mode, "out_format": out_format,
             "audio_index": audio_index,

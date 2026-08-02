@@ -244,6 +244,7 @@ DEFAULT_SETTINGS = {
     "last_seen_version": "",        # версия прошлого запуска (x.ddmmyy), см.
                                      # version_change_status()/mark_version_seen();
                                      # "" — ещё ни разу не запускалось
+    "seen": False,                  # флаг разового события, см. save_settings()
 }
 
 _settings = dict(DEFAULT_SETTINGS)
@@ -1086,11 +1087,38 @@ def cleanup_all_jobs(*_):
 
 
 def schedule_cleanup(job, delay=CLEANUP_AFTER_SERVE):
-    """Назначить задаче жёсткий срок удаления рабочих файлов через delay секунд.
+    """Назначить удаление ТОЛЬКО ЧТО ОТДАННОГО результата через delay секунд.
 
-    Вызывается, например, после отдачи готового файла в браузер: копия в
-    downloads/ больше не нужна. Вызывать под JOBS_LOCK."""
-    job["cleanup_at"] = time.time() + delay
+    Вызывается после отдачи готового файла в браузер: копия в downloads/
+    больше не нужна. Задачу и исходник (job['src_path']) это не трогает —
+    пока задача жива, тем же job_id можно пересчитать результат другими
+    настройками (см. tools/compress.py). Вызывать под JOBS_LOCK."""
+    path = job.get("filename")
+    if not path:
+        return
+    served = [e for e in job.get("_served_files", []) if e[0] != path]
+    served.append((path, time.time() + delay))
+    job["_served_files"] = served
+
+
+def clear_work_dir(work, keep_prefix="source"):
+    """Удаляет содержимое рабочей папки задачи, кроме файлов/папок, чьё имя
+    начинается с keep_prefix. Используется при отмене или повторной обработке
+    в tools/compress.py, чтобы не терять уже полученный исходник."""
+    try:
+        entries = list(work.iterdir())
+    except OSError:
+        return
+    for p in entries:
+        if p.name.startswith(keep_prefix):
+            continue
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        else:
+            try:
+                p.unlink()
+            except OSError:
+                pass
 
 
 # --- Уборщик (janitor): фоновое удаление старых файлов из temp/ --------------
@@ -1126,36 +1154,51 @@ def _sweep_cache():
 
 
 def _sweep_once():
-    """Один проход уборщика: убрать задачи, у которых вышел срок хранения.
+    """Один проход уборщика: убрать отданные файлы и отлежавшиеся задачи.
 
     Логика по статусу:
-      * активные — не трогаем и сбрасываем им таймеры (на случай повторного
-        запуска того же job_id, напр. при повторном сжатии);
-      * есть явный cleanup_at (после отдачи файла) — ждём этот срок;
-      * иначе отсчитываем от момента, когда задача впервые замечена «отлежавшейся»:
+      * активные — не трогаем вообще (ни отданные файлы, ни срок жизни), и
+        сбрасываем им таймер простоя — на случай повторного запуска того же
+        job_id (напр. при повторном сжатии другими настройками);
+      * неактивные — уже отданные в браузер файлы результата (см.
+        schedule_cleanup) удаляются по своему сроку, независимо от задачи;
+        сама задача (и её исходник) живёт, пока не истечёт срок простоя,
+        отсчитанный от момента, когда она впервые замечена «отлежавшейся»:
         завершённые — CLEANUP_IDLE_DONE, прочие неактивные — CLEANUP_IDLE_STALE.
     """
     now = time.time()
     due = []
+    file_due = []
     with JOBS_LOCK:
         for jid, job in list(JOBS.items()):
             status = job.get("status")
             if status in _ACTIVE_STATUSES:
-                job.pop("cleanup_at", None)
                 job.pop("_idle_since", None)
                 continue
-            deadline = job.get("cleanup_at")
-            if deadline is None:
-                if "_idle_since" not in job:
-                    job["_idle_since"] = now
-                ttl = (CLEANUP_IDLE_DONE if status in _TERMINAL_STATUSES
-                       else CLEANUP_IDLE_STALE)
-                deadline = job["_idle_since"] + ttl
-            if now >= deadline:
+            served = job.get("_served_files")
+            if served:
+                keep = [(p, at) for p, at in served if now < at]
+                file_due.extend(p for p, at in served if now >= at)
+                if keep:
+                    job["_served_files"] = keep
+                else:
+                    job.pop("_served_files", None)
+            if "_idle_since" not in job:
+                job["_idle_since"] = now
+            ttl = (CLEANUP_IDLE_DONE if status in _TERMINAL_STATUSES
+                   else CLEANUP_IDLE_STALE)
+            if now >= job["_idle_since"] + ttl:
                 due.append(jid)
 
-    # Удаляем папки вне локов (это IO). Запись о задаче убираем только если
-    # папка реально удалилась — иначе (файл залочен) повторим в следующий проход.
+    # Удаляем файлы/папки вне локов (это IO).
+    for path in file_due:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    # Запись о задаче убираем только если папка реально удалилась — иначе
+    # (файл залочен) повторим в следующий проход.
     for jid in due:
         d = DOWNLOADS_DIR / jid
         shutil.rmtree(d, ignore_errors=True)

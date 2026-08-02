@@ -51,6 +51,19 @@
                padding:8px 16px;border-radius:99px;font-size:12px;opacity:0;pointer-events:none;
                transition:opacity .2s;z-index:60}
   .saved-flash.show{opacity:1}
+  /* Видно только при settings.seen === true (см. applyState) — «стоит на
+     полу» внизу страницы, ничего не делает по клику. Заглушка описания при
+     наведении — заменить title на реальный текст, когда он будет. */
+  .egg-floor{display:flex;justify-content:center;margin-top:26px;cursor:default}
+  .egg-floor.hidden{display:none}
+  .egg-floor .egg-icon{
+    width:30px;height:35px;background-color:var(--muted);
+    -webkit-mask-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABGCAYAAACQRffVAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAsElEQVR4nO3awQ0BUBAG4XnTg4NSKUCpJBTxtOCwQYyvgD97nMOu0/XOpMvxsCf3zrfHmtyTGImRGImRGImRGImRmPVqaU0X1LRXi0xiJEZiJEZiJEZiJEZi1t77qwtqmsRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMSs/0f8j5MYiZEYiZEYiZEYP33Auz0Bq5QXYO27haoAAAAASUVORK5CYII=");
+    mask-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABGCAYAAACQRffVAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAsElEQVR4nO3awQ0BUBAG4XnTg4NSKUCpJBTxtOCwQYyvgD97nMOu0/XOpMvxsCf3zrfHmtyTGImRGImRGImRGImRmPVqaU0X1LRXi0xiJEZiJEZiJEZiJEZi1t77qwtqmsRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMRIjMSs/0f8j5MYiZEYiZEYiZEYP33Auz0Bq5QXYO27haoAAAAASUVORK5CYII=");
+    -webkit-mask-size:contain;mask-size:contain;
+    -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
+    -webkit-mask-position:center;mask-position:center;
+  }
 </style>
 {% endblock %}
 {% block content %}
@@ -301,6 +314,9 @@
 
   <button class="danger" id="btnReset" style="width:100%">сбросить настройки</button>
   <div class="version" id="version">текущая версия: …</div>
+  <div class="egg-floor hidden" id="eggFloor">
+    <div class="egg-icon"></div>
+  </div>
 </div>
 
 <!-- Универсальная модалка подтверждения (заголовок/текст/кнопки задаются
@@ -370,6 +386,7 @@ function applyState(st){
     else el.value = (s[k] === null || s[k] === undefined) ? "" : s[k];
   });
   $("version").textContent = "текущая версия: " + st.version;
+  $("eggFloor").classList.toggle("hidden", !s.seen);
   refreshToggles();
   renderStats(st.stats);
   renderDeps(st.deps);
