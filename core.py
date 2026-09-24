@@ -1128,13 +1128,39 @@ def clear_work_dir(work, keep_prefix="source"):
 
 # --- Уборщик (janitor): фоновое удаление старых файлов из temp/ --------------
 
+# Имена каталогов, которые приложение создаёт САМО в temp/ (DOWNLOADS_DIR):
+#   * <job_id>            — uuid4().hex[:12] (см. job_dir/новые задачи);
+#   * ytdlp-update-<8hex> — временная папка самообновления yt-dlp
+#                           (см. _update_ytdlp_bin).
+# Всё прочее в temp/ приложению НЕ принадлежит: если пользователь указал
+# «своим путём» постороннюю папку, её содержимое автоочистка не трогает
+# (иначе один только старт приложения сносил бы чужие подпапки — см. REL-1).
+_JOB_DIR_RE = re.compile(r'^[0-9a-f]{12}$')
+_YTDLP_UPDATE_DIR_RE = re.compile(r'^ytdlp-update-[0-9a-f]{8}$')
+# Кэш: <sha1(key)[:16]> — см. _cache_subdir.
+_CACHE_DIR_RE = re.compile(r'^[0-9a-f]{16}$')
+
+
+def is_app_job_dir(name):
+    """True, если имя подпапки temp/ создано приложением (job_id или временная
+    папка self-update yt-dlp) — только такие каталоги вправе удалять уборщик."""
+    return bool(_JOB_DIR_RE.match(name) or _YTDLP_UPDATE_DIR_RE.match(name))
+
+
+def is_cache_dir(name):
+    """True, если имя подпапки кэша создано приложением (_cache_subdir)."""
+    return bool(_CACHE_DIR_RE.match(name))
+
+
 def _purge_orphans():
-    """При старте удалить все поддиректории temp/ — это остатки прошлых
-    запусков (после краша/убийства процесса), живых задач на старте ещё нет."""
+    """При старте удалить остатки прошлых запусков (подпапки temp/, созданные
+    приложением) — после краша/убийства процесса живых задач на старте нет.
+    Удаляются только каталоги с именами приложения (is_app_job_dir), чтобы не
+    задеть пользовательские данные, если temp указывает на чужую папку."""
     removed = 0
     try:
         for entry in DOWNLOADS_DIR.iterdir():
-            if entry.is_dir() and entry.name != "_cache":   # кэш не трогаем
+            if entry.is_dir() and is_app_job_dir(entry.name):
                 shutil.rmtree(entry, ignore_errors=True)
                 removed += 1
     except Exception:
@@ -1144,11 +1170,13 @@ def _purge_orphans():
 
 
 def _sweep_cache():
-    """Удалить кэшированные ролики, к которым давно не обращались (по .ready)."""
+    """Удалить кэшированные ролики, к которым давно не обращались (по .ready).
+    Рассматриваются только каталоги, созданные приложением (is_cache_dir) —
+    если cache указывает на чужую папку, её содержимое не трогается (REL-1b)."""
     now = time.time()
     try:
         for d in CACHE_DIR.iterdir():
-            if not d.is_dir():
+            if not d.is_dir() or not is_cache_dir(d.name):
                 continue
             ready = d / ".ready"
             mtime = ready.stat().st_mtime if ready.is_file() else 0
@@ -2258,12 +2286,19 @@ def path_stats(path):
         return {"exists": False, "size": 0, "mtime": None, "atime": None}
 
 
-def clear_path(path):
-    """Очистить содержимое папки (или удалить файл). True при успехе."""
+def clear_path(path, name_filter=None):
+    """Очистить содержимое папки (или удалить файл). True при успехе.
+
+    name_filter — необязательный предикат по имени элемента: если задан,
+    удаляются ТОЛЬКО совпадающие элементы. Нужен для temp/cache: если путь
+    указывает на пользовательскую папку, очистка не должна сносить чужое
+    (см. REL-1) — приложение владеет лишь каталогами со своими именами."""
     p = Path(path)
     try:
         if p.is_dir():
             for e in p.iterdir():
+                if name_filter is not None and not name_filter(e.name):
+                    continue
                 if e.is_dir():
                     shutil.rmtree(e, ignore_errors=True)
                 else:

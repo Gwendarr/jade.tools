@@ -141,9 +141,9 @@ def api_clear():
     data = request.get_json(silent=True) or {}
     target = (data.get("target") or "").strip()
     if target == "cache":
-        core.clear_path(core.CACHE_DIR)
+        core.clear_path(core.CACHE_DIR, core.is_cache_dir)
     elif target == "temp":
-        core.clear_path(core.DOWNLOADS_DIR)
+        core.clear_path(core.DOWNLOADS_DIR, core.is_app_job_dir)
     else:
         return jsonify({"error": "Неизвестная категория очистки."}), 400
     return jsonify({"ok": True, "stats": _stats()})
