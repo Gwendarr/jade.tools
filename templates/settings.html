@@ -29,6 +29,11 @@
            color:var(--text);text-transform:lowercase;letter-spacing:.3px;font-weight:500;
            margin-bottom:10px}
   .chk-row input{width:17px;height:17px;accent-color:var(--accent);cursor:pointer;margin:0}
+  .disclosure-btn{display:inline-flex;align-items:center;gap:6px;background:none;
+                  border:none;padding:0;color:var(--muted);font-size:12px;font-weight:500}
+  .disclosure-btn:hover{opacity:1;color:var(--text)}
+  .disclosure-ic{display:inline-block;transition:transform .15s}
+  .disclosure-btn.open .disclosure-ic{transform:rotate(180deg)}
   input:disabled,select:disabled{opacity:.45;cursor:not-allowed}
   /* Раздел очистки */
   .clear-row{display:flex;align-items:center;gap:14px;padding:14px 0;border-top:1px solid var(--line)}
@@ -80,6 +85,19 @@
       <label class="chk-row"><input type="checkbox" data-key="check_app_updates" id="check_app_updates"> проверка обновлений приложения</label>
       <div class="hintmuted">Периодически проверяет наличие новой версии на GitHub и показывает
         уведомление рядом с кнопкой репозитория. Ничего не скачивает и не устанавливает само.</div>
+    </div>
+    <div class="field">
+      <label class="chk-row"><input type="checkbox" data-key="no_browser_on_start" id="no_browser_on_start"> запускать без открытия вкладки браузера</label>
+      <div class="hintmuted">Приложение запустится в фоне (иконка в трее), но не откроет вкладку
+        автоматически. Открыть интерфейс можно через иконку в трее.</div>
+      <button type="button" class="disclosure-btn" id="btnAutostartHelp" style="margin-top:10px">
+        <span data-icon="chevronDown" class="disclosure-ic"></span> для автозапуска с Windows
+      </button>
+      <div id="autostartHelp" class="hintmuted hidden" style="margin-top:10px;line-height:1.7">
+        Чтобы вкладка не открывалась только при автозапуске Windows (а при обычном
+        запуске открывалась как всегда) — не включайте эту галочку, а допишите
+        <code>--autostart</code> в конце поля «Объект» у ярлыка в автозагрузке.
+      </div>
     </div>
   </div>
 
@@ -580,6 +598,13 @@ $("btnCookieHelp").addEventListener("click", ()=>{
   $("cookieHelp").classList.toggle("hidden");
 });
 
+// ---- Автозапуск: раскрывающаяся инструкция про --autostart (тот же паттерн,
+// что у cookieHelp выше, + переворот стрелки — см. .disclosure-btn.open). ----
+$("btnAutostartHelp").addEventListener("click", ()=>{
+  $("autostartHelp").classList.toggle("hidden");
+  $("btnAutostartHelp").classList.toggle("open");
+});
+
 // ---- Обзор (нативный диалог) ----
 qa("[data-pick]").forEach(btn=>{
   btn.addEventListener("click", async ()=>{
@@ -701,14 +726,16 @@ function renderYtdlp(d){
 
 function setYtdlpBtnMode(mode){
   ytdlpBtnMode = mode;
-  $("btnCheckYtdlp").textContent = mode === "update" ? "обновить" : "проверить обновление";
+  const btn = $("btnCheckYtdlp");
+  btn.classList.remove("is-loading");
+  btn.textContent = mode === "update" ? "обновить" : "проверить обновление";
 }
 
 $("btnCheckYtdlp").addEventListener("click", async ()=>{
   if(ytdlpSourceKind === "system-other" || ytdlpSourceKind === "missing") return;
   const btn = $("btnCheckYtdlp");
   if(ytdlpBtnMode === "check"){
-    btn.disabled = true; btn.textContent = "проверяю…";
+    btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "проверяю";
     try{
       const d = await (await fetch("/settings/api/check_ytdlp", {method:"POST"})).json();
       renderYtdlp(d);
@@ -719,7 +746,7 @@ $("btnCheckYtdlp").addEventListener("click", async ()=>{
       updateYtdlpBtnAvailability();
     }
   }else{
-    btn.disabled = true; btn.textContent = "обновляется…";
+    btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "обновляется";
     try{
       const d = await (await fetch("/api/ytdlp_update_do", {method:"POST"})).json();
       renderYtdlp(d);

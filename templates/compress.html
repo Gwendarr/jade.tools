@@ -156,7 +156,7 @@ async function uploadFile(file){
 $("btnFetch").addEventListener("click", async ()=>{
   const url = $("url").value.trim();
   if(!url){ setMsg($("srcMsg"), "Вставьте ссылку на видео.", "err"); return; }
-  const b = $("btnFetch"); b.disabled = true; b.textContent = "Получаю…";
+  const b = $("btnFetch"); b.disabled = true; b.classList.add("is-loading"); b.textContent = "получаю";
   try{
     const res = await fetch("/compress/api/fetch", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -168,7 +168,7 @@ $("btnFetch").addEventListener("click", async ()=>{
     showSettings(d.title, d.duration, null, d.src_height);
     setMsg($("srcMsg"), "", "");
   }catch(e){ setMsg($("srcMsg"), e.message, "err"); }
-  finally{ b.disabled = false; b.textContent = "получить"; }
+  finally{ b.disabled = false; b.classList.remove("is-loading"); b.textContent = "получить"; }
 });
 $("url").addEventListener("keydown", e=>{ if(e.key === "Enter") $("btnFetch").click(); });
 
@@ -222,7 +222,7 @@ $("btnCompress").addEventListener("click", async ()=>{
     audio_kbps: parseInt($("audioKbps").value, 10) || 128,
     height: parseInt($("resolution").value, 10) || 0,
   };
-  const b = $("btnCompress"); b.disabled = true; b.textContent = "Запускаю…";
+  const b = $("btnCompress"); b.disabled = true; b.classList.add("is-loading"); b.textContent = "запускаю";
   try{
     const res = await fetch("/compress/api/start", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -241,7 +241,7 @@ $("btnCompress").addEventListener("click", async ()=>{
     $("progressCard").classList.remove("hidden");
     setMsg($("progMsg"), e.message, "err");
   }finally{
-    b.disabled = false; b.innerHTML = ICONS.shrink + " сжать";
+    b.disabled = false; b.classList.remove("is-loading"); b.innerHTML = ICONS.shrink + " сжать";
   }
 });
 

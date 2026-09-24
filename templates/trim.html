@@ -464,7 +464,7 @@ async function uploadFile(file){
 $("btnFetch").addEventListener("click", async ()=>{
   const url = $("url").value.trim();
   if(!url){ setMsg($("srcMsg"), "Вставьте ссылку.", "err"); return; }
-  const b = $("btnFetch"); b.disabled = true; b.textContent = "Получаю…";
+  const b = $("btnFetch"); b.disabled = true; b.classList.add("is-loading"); b.textContent = "получаю";
   try{
     const res = await fetch("/trim/api/info", {
       method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({url})
@@ -475,7 +475,7 @@ $("btnFetch").addEventListener("click", async ()=>{
     setMsg($("srcMsg"), "", "");
     showQuality(d);
   }catch(e){ setMsg($("srcMsg"), e.message, "err"); }
-  finally{ b.disabled = false; b.textContent = "получить"; }
+  finally{ b.disabled = false; b.classList.remove("is-loading"); b.textContent = "получить"; }
 });
 $("url").addEventListener("keydown", e=>{ if(e.key === "Enter") $("btnFetch").click(); });
 
@@ -503,7 +503,7 @@ function showQuality(d){
 $("btnPrepare").addEventListener("click", async ()=>{
   if(!prepJob) return;
   const height = parseInt($("quality").value, 10) || 0;
-  const b = $("btnPrepare"); b.disabled = true; b.textContent = "Запускаю…";
+  const b = $("btnPrepare"); b.disabled = true; b.classList.add("is-loading"); b.textContent = "запускаю";
   try{
     const res = await fetch("/trim/api/prepare", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -519,7 +519,7 @@ $("btnPrepare").addEventListener("click", async ()=>{
     setMsg($("prepMsg"), "", "");
     startPrepPoll(prepJob);
   }catch(e){ setMsg($("qMsg"), e.message, "err"); }
-  finally{ b.disabled = false; b.innerHTML = ICONS.download + " подготовить"; }
+  finally{ b.disabled = false; b.classList.remove("is-loading"); b.innerHTML = ICONS.download + " подготовить"; }
 });
 
 function startPrepPoll(id){
@@ -1077,7 +1077,7 @@ $("btnTrim").addEventListener("click", async ()=>{
                    target_mb: parseFloat($("targetMb").value) || 0,
                    resolution: parseInt($("resolution").value, 10) || 0,
                    audio_kbps: parseInt($("audioKbps").value, 10) || 128};
-  const b = $("btnTrim"); b.disabled = true; b.textContent = "Запускаю…";
+  const b = $("btnTrim"); b.disabled = true; b.classList.add("is-loading"); b.textContent = "запускаю";
   try{
     const res = await fetch("/trim/api/start", {
       method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
@@ -1095,7 +1095,7 @@ $("btnTrim").addEventListener("click", async ()=>{
   }catch(e){
     $("progressCard").classList.remove("hidden");
     setMsg($("progMsg"), e.message, "err");
-  }finally{ b.disabled = false; updateTrimBtn(); }
+  }finally{ b.disabled = false; b.classList.remove("is-loading"); updateTrimBtn(); }
 });
 
 function startTrimPoll(id){

@@ -228,7 +228,7 @@ $("btnInfo").addEventListener("click", async () => {
   const url = $("url").value.trim();
   if(!url){ setMsg($("infoMsg"), "Вставьте ссылку на видео или плейлист.", "err"); return; }
   const btn = $("btnInfo");
-  btn.disabled = true; btn.textContent = "Получаю…";
+  btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "получаю";
   setMsg($("infoMsg"), "", "");
   stopPolling(); stopPlaylistPolling();
   $("progressCard").classList.add("hidden");
@@ -261,7 +261,7 @@ $("btnInfo").addEventListener("click", async () => {
     setMsg($("infoMsg"), e.message, "err");
     $("settings").classList.add("hidden");
   }finally{
-    btn.disabled = false; btn.textContent = "получить информацию";
+    btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = "получить информацию";
   }
 });
 
@@ -464,7 +464,7 @@ async function startSingleDownload(){
     audio_format: $("audioFmt").value || "mp3",
   };
   const btn = $("btnDownload");
-  btn.disabled = true; btn.textContent = "Запускаю…";
+  btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "запускаю";
   try{
     const res = await fetch("/youtube/api/download", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -484,7 +484,7 @@ async function startSingleDownload(){
     $("progressCard").classList.remove("hidden");
     setMsg($("progMsg"), e.message, "err");
   }finally{
-    btn.disabled = false; updateDownloadButtonLabel();
+    btn.disabled = false; btn.classList.remove("is-loading"); updateDownloadButtonLabel();
   }
 }
 
@@ -506,7 +506,7 @@ async function startPlaylistDownload(){
     delivery: activeDelivery,
   };
   const btn = $("btnDownload");
-  btn.disabled = true; btn.textContent = "Запускаю…";
+  btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "запускаю";
   try{
     const res = await fetch("/youtube/api/download_playlist", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -527,7 +527,7 @@ async function startPlaylistDownload(){
     $("playlistProgressCard").classList.remove("hidden");
     setMsg($("plProgMsg"), e.message, "err");
   }finally{
-    btn.disabled = false; updateDownloadButtonLabel();
+    btn.disabled = false; btn.classList.remove("is-loading"); updateDownloadButtonLabel();
   }
 }
 

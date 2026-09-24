@@ -138,7 +138,7 @@
       });
       document.getElementById("tempModalUseAppBtn").addEventListener("click", async ()=>{
         const btn = document.getElementById("tempModalUseAppBtn");
-        btn.disabled = true; btn.textContent = "переключаю…";
+        btn.disabled = true; btn.classList.add("is-loading"); btn.textContent = "переключаю";
         try{
           await fetch("/settings/api/save", {
             method:"POST", headers:{"Content-Type":"application/json"},
@@ -146,7 +146,7 @@
           });
           modal.classList.remove("show");
         }catch(e){
-          btn.disabled = false; btn.textContent = "да, использовать папку приложения";
+          btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = "да, использовать папку приложения";
         }
       });
     }
@@ -189,7 +189,8 @@
 
     action.addEventListener("click", async ()=>{
       action.disabled = true;
-      action.textContent = "обновляется…";
+      action.classList.add("is-loading");
+      action.textContent = "обновляется";
       try{
         const res = await (await fetch("/api/ytdlp_update_do", {method:"POST"})).json();
         text.textContent = res.message || "Не удалось обновить yt-dlp.";
@@ -197,11 +198,13 @@
           action.remove();   // обновление удалось — кнопка больше не нужна
         }else{
           action.disabled = false;
+          action.classList.remove("is-loading");
           action.textContent = "повторить";
         }
       }catch(e){
         text.textContent = "Не удалось обновить yt-dlp: ошибка запроса.";
         action.disabled = false;
+        action.classList.remove("is-loading");
         action.textContent = "повторить";
       }
     });
