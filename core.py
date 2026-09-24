@@ -319,6 +319,19 @@ def _normalize_audio_kbps(value):
     return v if v in _VALID_AUDIO_KBPS else 192
 
 
+# Лимит одновременных загрузок плейлиста (см. youtube.py: _download_playlist_thread).
+_VALID_MAX_CONCURRENT = ("1", "2", "3", "5", "unlimited")
+
+
+def _normalize_max_concurrent(value):
+    """Допустимы 1/2/3/5/unlimited. Всё прочее, включая '0' (который в
+    youtube.py трактовался как «без ограничения»), тихо сводится к '3' —
+    безопасному дефолту. 'unlimited' сохраняется как есть: это осознанный
+    режим (см. REL-7)."""
+    v = str(value if value is not None else "").strip().lower()
+    return v if v in _VALID_MAX_CONCURRENT else "3"
+
+
 def _normalize_clip_length(value):
     """"" = не задано (маркер конца на всей длительности, см. trim.html). Иначе
     должно быть числом > 0 секунд; `min="1"` на фронте — только подсказка, не
@@ -404,6 +417,8 @@ def load_settings():
     s["cache_mode"] = _normalize_path_mode(s.get("cache_mode"))
     s["default_clip_length_for_timestamp_link"] = _normalize_clip_length(
         s.get("default_clip_length_for_timestamp_link"))
+    s["max_concurrent_downloads"] = _normalize_max_concurrent(
+        s.get("max_concurrent_downloads"))
     _settings = s
     return s
 
@@ -427,6 +442,8 @@ def save_settings(partial, strict=False):
     s["cache_mode"] = _normalize_path_mode(s.get("cache_mode"))
     s["default_clip_length_for_timestamp_link"] = _normalize_clip_length(
         s.get("default_clip_length_for_timestamp_link"))
+    s["max_concurrent_downloads"] = _normalize_max_concurrent(
+        s.get("max_concurrent_downloads"))
     _settings = s
     write_error = None
     try:
