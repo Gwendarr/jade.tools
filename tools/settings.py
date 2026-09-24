@@ -129,8 +129,12 @@ def api_save():
         core.save_settings(data, strict=True)
     except Exception as e:
         return jsonify({"error": "Не удалось сохранить настройки: " + str(e)}), 500
-    return jsonify({"ok": True, "settings": core.get_settings(), "stats": _stats(),
-                    "paths": _paths()})
+    # stats (размеры temp/cache/лога) от смены настроек не меняются, а их подсчёт
+    # — рекурсивный обход папок на КАЖДОЕ автосохранение (лаг при большом temp).
+    # Поэтому здесь не считаем; свежие цифры приходят из /settings/api/state
+    # (открытие страницы) и /settings/api/clear (после очистки). Фронт уже
+    # проверяет наличие d.stats (см. templates/settings.html: save).
+    return jsonify({"ok": True, "settings": core.get_settings(), "paths": _paths()})
 
 
 @bp.route("/api/reset", methods=["POST"])
