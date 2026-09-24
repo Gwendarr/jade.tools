@@ -746,7 +746,7 @@ def api_start():
         job = core.JOBS.get(job_id)
         if not job or not job.get("src_path"):
             return jsonify({"error": "Источник не готов. Загрузите заново."}), 404
-        if job["status"] in ("downloading", "processing"):
+        if core.is_job_active(job):
             return jsonify({"error": "Эта задача уже выполняется."}), 409
         if out_mode == "video" and not job.get("has_video"):
             return jsonify({"error": "В источнике нет видео."}), 400

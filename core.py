@@ -1047,6 +1047,14 @@ _ACTIVE_STATUSES   = ("pending", "fetching", "downloading", "processing")
 _TERMINAL_STATUSES = ("done", "error", "canceled")
 
 
+def is_job_active(job):
+    """True, если задача уже выполняется/в очереди на выполнение. Нужно API-
+    роутам, чтобы повторный/параллельный запуск той же задачи (двойной клик,
+    повторный fetch) получал 409, а не запускал вторую работу на ту же папку
+    (см. REL-2)."""
+    return bool(job) and job.get("status") in _ACTIVE_STATUSES
+
+
 def new_job(initial=None):
     job = {
         "status": "pending",   # pending|fetching|ready|downloading|processing

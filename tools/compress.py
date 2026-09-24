@@ -337,7 +337,7 @@ def api_start():
         if not job:
             return jsonify({"error": "Задача не найдена. "
                                      "Загрузите видео заново."}), 404
-        if job["status"] in ("downloading", "processing"):
+        if core.is_job_active(job):
             return jsonify({"error": "Эта задача уже выполняется."}), 409
         job.update({
             "status": "pending", "progress": 0.0, "error": "", "stage": "",

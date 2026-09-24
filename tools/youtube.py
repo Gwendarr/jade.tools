@@ -535,7 +535,7 @@ def api_download():
         if not job:
             return jsonify({"error": "Задача не найдена. "
                                      "Получите информацию заново."}), 404
-        if job["status"] == "downloading":
+        if core.is_job_active(job):
             return jsonify({"error": "Эта задача уже скачивается"}), 409
         job.update({
             "status": "pending", "progress": 0.0, "speed": "", "eta": "",
