@@ -334,6 +334,16 @@ def _normalize_clip_length(value):
     return v if n > 0 else ""
 
 
+def parse_int(value, default=0):
+    """Целое из пользовательского ввода без падения: None/""/нечисло ->
+    default. Заменяет голый int() в API-роутах, который на мусорный JSON
+    отвечал 500 (см. REL-5)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 _VALID_PATH_MODES = ("app", "system", "custom")
 
 

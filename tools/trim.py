@@ -606,7 +606,7 @@ def api_prepare():
     """Скачать YouTube-ролик во временную папку и проанализировать."""
     data = request.get_json(silent=True) or {}
     job_id = (data.get("job_id") or "").strip()
-    height = int(data.get("height") or 0)
+    height = core.parse_int(data.get("height"), 0)
     dep_err = core.missing_dependencies_payload("trim")
     if dep_err:
         return jsonify(dep_err), 400
@@ -721,14 +721,14 @@ def api_start():
     job_id = (data.get("job_id") or "").strip()
     out_mode = (data.get("mode") or "audio").strip()
     out_format = (data.get("format") or "mp3").strip()
-    audio_index = int(data.get("audio") or 0)
+    audio_index = core.parse_int(data.get("audio"), 0)
     do_compress = bool(data.get("compress"))
     try:
         target_mb = float(data.get("target_mb") or 0)
     except (TypeError, ValueError):
         target_mb = 0
-    c_height = int(data.get("resolution") or 0)     # 0 = исходное
-    audio_kbps = int(data.get("audio_kbps") or 128)
+    c_height = core.parse_int(data.get("resolution"), 0)     # 0 = исходное
+    audio_kbps = core.parse_int(data.get("audio_kbps"), 128)
     try:
         start = float(data.get("start"))
         end = float(data.get("end"))

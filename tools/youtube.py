@@ -512,7 +512,7 @@ def api_download():
     url = (data.get("url") or "").strip()
     job_id = (data.get("job_id") or "").strip()
     mode = data.get("mode") or "video_audio"
-    height = int(data.get("height") or 0)
+    height = core.parse_int(data.get("height"), 0)
     audio_id = data.get("audio_id") or ""
     video_format = (data.get("video_format") or "mp4").strip()
     audio_format = (data.get("audio_format") or "mp3").strip()
@@ -563,7 +563,7 @@ def api_download_playlist():
     data = request.get_json(silent=True) or {}
     job_id = (data.get("job_id") or "").strip()
     mode = data.get("mode") or "video_audio"
-    height = int(data.get("height") or 0)
+    height = core.parse_int(data.get("height"), 0)
     audio_id = data.get("audio_id") or ""
     video_format = (data.get("video_format") or "mp4").strip()
     audio_format = (data.get("audio_format") or "mp3").strip()

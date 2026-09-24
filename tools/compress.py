@@ -325,8 +325,8 @@ def api_start():
     # разрешению и звуку (см. _compress_thread).
     if target_mb < 0:
         return jsonify({"error": "Целевой размер не может быть отрицательным."}), 400
-    audio_kbps = int(data.get("audio_kbps") or 128)
-    height = int(data.get("height") or 0)   # 0 = исходное разрешение
+    audio_kbps = core.parse_int(data.get("audio_kbps"), 128)
+    height = core.parse_int(data.get("height"), 0)   # 0 = исходное разрешение
     dep_err = core.missing_dependencies_payload("compress")
     if dep_err:
         return jsonify(dep_err), 400
