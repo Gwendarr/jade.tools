@@ -8,7 +8,6 @@
 """
 
 import os
-import re
 import uuid
 import shutil
 import threading
@@ -29,20 +28,6 @@ TOOL = {
              'M16 3v3a2 2 0 0 0 2 2h3M8 21v-3a2 2 0 0 0-2-2H3'
              'M16 21v-3a2 2 0 0 1 2-2h3"/></svg>'),
 }
-
-_DL_RE = re.compile(r'\[download\]\s+([\d.]+)%')
-
-
-def _parse_dl_progress(line, job):
-    m = _DL_RE.search(line)
-    if not m:
-        return False
-    try:
-        job["progress"] = float(m.group(1))
-    except ValueError:
-        pass
-    return True
-
 
 def _download_source(job_id, job, url):
     """Скачивает исходное видео (видео+звук, mp4) для последующего сжатия.
@@ -66,7 +51,7 @@ def _download_source(job_id, job, url):
             "-o", out_tmpl, "-f", "bv*+ba/b", "--merge-output-format", "mp4",
             "--newline", "--progress", url, cookies=cookies,
         ),
-        job, work, _parse_dl_progress,
+        job, work, core.parse_dl_progress,
         err_needle=("error", "ffmpeg"), tail_len=300,
     )
     if rc is None:

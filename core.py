@@ -1613,6 +1613,25 @@ def resolve_video_or_playlist(url):
     return False, info, ""
 
 
+_DL_PROGRESS_RE = re.compile(r'\[download\]\s+([\d.]+)%')
+
+
+def parse_dl_progress(line, job):
+    """Простейший прогресс `[download] N%` из вывода yt-dlp -> job['progress'].
+
+    Используется «сжать»/«нарезать» (в «скачать» — более полный _PROGRESS_RE,
+    который читает ещё size/speed/ETA). True, если строка распознана как
+    прогресс (единая реализация вместо копий в модулях, см. SMELL-2)."""
+    m = _DL_PROGRESS_RE.search(line)
+    if not m:
+        return False
+    try:
+        job["progress"] = float(m.group(1))
+    except ValueError:
+        pass
+    return True
+
+
 def run_ytdlp_download(build_cmd, job, work_dir, on_line,
                        err_needle=("error", "warning", "ffmpeg"), tail_len=400):
     """Скачивание через yt-dlp (Popen, построчный прогресс) с cookies «по мере

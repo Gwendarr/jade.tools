@@ -14,7 +14,6 @@
 """
 
 import os
-import re
 import array
 import uuid
 import shutil
@@ -57,19 +56,6 @@ _PEAK_SR = 8000
 # пропорциях, выбирая ближайший по времени — поэтому кадры не сжимаются.
 _FILMSTRIP_FRAMES = 120
 _FILMSTRIP_HEIGHT = 90       # высота кадра полосы, px
-
-_DL_RE = re.compile(r'\[download\]\s+([\d.]+)%')
-
-
-def _parse_dl_progress(line, job):
-    m = _DL_RE.search(line)
-    if not m:
-        return False
-    try:
-        job["progress"] = float(m.group(1))
-    except ValueError:
-        pass
-    return True
 
 
 # --- Анализ источника --------------------------------------------------------
@@ -262,7 +248,7 @@ def _prepare_thread(job_id, job, url, height):
                 "-o", out_tmpl, "--newline", "--progress", url, cookies=cookies)
 
         rc, err_tail = core.run_ytdlp_download(
-            build_cmd, job, work, _parse_dl_progress,
+            build_cmd, job, work, core.parse_dl_progress,
             err_needle=("error", "ffmpeg"), tail_len=300,
         )
         if rc is None:
