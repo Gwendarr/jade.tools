@@ -125,7 +125,10 @@ def api_save():
             return jsonify({"error": err, "field": k}), 400
     if "theme" in data and data["theme"] not in ("dark", "light"):
         data["theme"] = "dark"
-    core.save_settings(data)
+    try:
+        core.save_settings(data, strict=True)
+    except Exception as e:
+        return jsonify({"error": "Не удалось сохранить настройки: " + str(e)}), 500
     return jsonify({"ok": True, "settings": core.get_settings(), "stats": _stats(),
                     "paths": _paths()})
 

@@ -408,8 +408,13 @@ def load_settings():
     return s
 
 
-def save_settings(partial):
-    """Обновить настройки (частично), сохранить на диск и применить."""
+def save_settings(partial, strict=False):
+    """Обновить настройки (частично), сохранить на диск и применить.
+
+    strict=True — пробросить наружу ошибку записи settings.json (для API,
+    которое вернёт её пользователю); по умолчанию ошибка только логируется,
+    чтобы внутренние вызовы (mark_version_seen при старте и т.п.) не падали
+    из-за недоступного файла (см. REL-3)."""
     global _settings
     s = dict(_settings)
     for k, v in (partial or {}).items():
@@ -423,13 +428,17 @@ def save_settings(partial):
     s["default_clip_length_for_timestamp_link"] = _normalize_clip_length(
         s.get("default_clip_length_for_timestamp_link"))
     _settings = s
+    write_error = None
     try:
         SETTINGS_FILE.write_text(json.dumps(s, ensure_ascii=False, indent=2),
                                  encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        write_error = e
+        logger.warning("Настройки: не удалось записать %s: %s", SETTINGS_FILE, e)
     apply_settings()
     logger.info("Настройки обновлены: %s", partial)
+    if write_error is not None and strict:
+        raise write_error
     return s
 
 
