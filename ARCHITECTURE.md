@@ -251,7 +251,8 @@ State-changing POST-запросы защищены от чужих сайтов
 
 | Метод | Путь | `{payload}` → ответ |
 |-------|------|------|
-| POST | `/youtube/api/info` | `{url}` → метаданные одиночного видео **или**, если ссылка на плейлист, `{is_playlist: true, playlist}` |
+| POST | `/youtube/api/info` | `{url}` → `{job_id, pending: true}`: получение метаданных уходит в фон (см. п.1), фронт опрашивает `/api/status/<job_id>` и забирает результат |
+| GET  | `/youtube/api/info_result/<job_id>` | метаданные одиночного видео **или**, если ссылка на плейлист, `{is_playlist: true, playlist}`; `202`, пока задача не готова |
 | GET  | `/youtube/api/formats` | список форматов видео/аудио для UI |
 | POST | `/youtube/api/download` | `{url, job_id, mode, height, audio_id, video_format, audio_format}` → запуск скачивания одного видео |
 | POST | `/youtube/api/download_playlist` | `{job_id, mode, height, audio_id, video_format, audio_format, selected_ids, delivery}` → запуск скачивания отмеченных видео плейлиста |
