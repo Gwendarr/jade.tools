@@ -2433,6 +2433,24 @@ def _fmt_bytes(n):
     return f"{v:.1f} {units[i]}" if i else f"{int(v)} {units[i]}"
 
 
+_SIZE_CACHE_TTL = 300   # с — обход папок на баннере может быть реже проверки места
+_dir_size_cache = {"ts": 0.0, "result": None}
+
+
+def _cached_dir_sizes():
+    """(temp_bytes, cache_bytes) с кэшем на _SIZE_CACHE_TTL. Рекурсивный обход
+    папок не бесплатный, а для баннера на главной точность до минут не важна
+    (OPT-1). Страница настроек считается отдельно (path_stats напрямую) — там
+    цифры всегда свежие."""
+    now = time.time()
+    cached = _dir_size_cache["result"]
+    if cached is None or now - _dir_size_cache["ts"] > _SIZE_CACHE_TTL:
+        cached = (path_stats(DOWNLOADS_DIR).get("size", 0),
+                  path_stats(CACHE_DIR).get("size", 0))
+        _dir_size_cache.update(ts=now, result=cached)
+    return cached
+
+
 def check_disk_and_cache(force=False):
     """Свободное место на диске + суммарный размер кэша/temp jade.tools.
 
@@ -2447,8 +2465,7 @@ def check_disk_and_cache(force=False):
         free = shutil.disk_usage(str(DOWNLOADS_DIR)).free
     except Exception:
         free = None
-    temp_size = path_stats(DOWNLOADS_DIR).get("size", 0)
-    cache_size = path_stats(CACHE_DIR).get("size", 0)
+    temp_size, cache_size = _cached_dir_sizes()
     total = temp_size + cache_size
 
     reasons = []
