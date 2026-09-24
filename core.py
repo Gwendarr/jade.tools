@@ -2188,6 +2188,19 @@ def safe_filename(name, fallback="media", max_len=150):
     return name[:max_len] or fallback
 
 
+_SAFE_EXT_RE = re.compile(r'^\.[A-Za-z0-9]{1,6}$')
+
+
+def safe_ext(ext, default=".mp4"):
+    """Безопасное расширение файла для имени на диске: только '.<алфанум 1-6>',
+    иначе default. Имя загрузки приходит от клиента, поэтому ':' (ADS в NTFS),
+    '*', '?', '"' и прочее недопустимое в путях Windows не пропускаем
+    (см. REL-6). Расширение не может содержать разделитель пути — это уже
+    гарантирует os.path.splitext, здесь закрываем остальные спецсимволы."""
+    e = str(ext or "")
+    return e if _SAFE_EXT_RE.match(e) else default
+
+
 # --- ffmpeg / ffprobe --------------------------------------------------------
 
 _FF_DUR_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")

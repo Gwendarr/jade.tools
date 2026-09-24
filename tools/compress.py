@@ -252,9 +252,13 @@ def api_upload():
     work = core.job_dir(job_id)
 
     stem, ext = os.path.splitext(f.filename)
-    safe = core.safe_filename(stem) + (ext or ".mp4")
+    safe = core.safe_filename(stem) + core.safe_ext(ext)
     dst = work / ("source_" + safe)
-    f.save(str(dst))
+    try:
+        f.save(str(dst))
+    except OSError as e:
+        core.logger.warning("Сжать: не удалось сохранить загруженный файл: %s", e)
+        return jsonify({"error": "Не удалось сохранить загруженный файл."}), 400
 
     duration = core.ffprobe_duration(dst)
     _w, src_height = core.ffprobe_resolution(dst)
