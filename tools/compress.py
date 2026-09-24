@@ -261,6 +261,47 @@ def api_upload():
                     "src_height": src_height})
 
 
+def _fetch_thread(job_id, job, url):
+    """Фоновая добыча метаданных для /compress/api/fetch (см. п.1): HTTP-запрос
+    не висит всё время работы yt-dlp, результат кладётся в задачу."""
+    try:
+        is_pl, info, err = core.resolve_video_or_playlist(url)
+        if err:
+            with core.JOBS_LOCK:
+                job["status"] = "error"
+                job["error"] = err
+            return
+        if is_pl:
+            with core.JOBS_LOCK:
+                job["status"] = "error"
+                job["error"] = ("Ссылки на плейлисты поддерживаются только "
+                                "в разделе «скачать».")
+            return
+        if not info:
+            with core.JOBS_LOCK:
+                job["status"] = "error"
+                job["error"] = "Не удалось получить информацию о видео."
+            return
+        title = info.get("title") or "video"
+        duration = info.get("duration") or 0
+        # Максимальная доступная высота (исходное разрешение).
+        src_height = info.get("height") or 0
+        if not src_height:
+            src_height = max((f.get("height") or 0)
+                             for f in (info.get("formats") or [{}]))
+        with core.JOBS_LOCK:
+            job.update({
+                "status": "ready", "stage": "", "title": title, "url": url,
+                "duration": duration, "src_height": src_height,
+                "video_id": info.get("id") or "",
+            })
+    except Exception as e:
+        core.logger.error("Сжать: исключение при получении информации (%s): %s", url, e)
+        with core.JOBS_LOCK:
+            job["status"] = "error"
+            job["error"] = f"{type(e).__name__}: {e}"
+
+
 @bp.route("/api/fetch", methods=["POST"])
 def api_fetch():
     data = request.get_json(silent=True) or {}
@@ -270,36 +311,35 @@ def api_fetch():
     if not core.is_supported_url(url):
         return jsonify({"error": "Поддерживаются только ссылки http:// или https://."}), 400
 
-    # core.resolve_video_or_playlist() объединяет быструю проверку --flat-playlist
-    # (без неё полный dump-single-json на ссылке-плейлисте утыкается в таймаут)
-    # и получение полных метаданных одиночного видео в один проход.
-    is_pl, info, err = core.resolve_video_or_playlist(url)
-    if err:
-        return jsonify({"error": err}), 400
-    if is_pl:
-        return jsonify({"error": "Ссылки на плейлисты поддерживаются только "
-                                 "в разделе «скачать»."}), 400
-    # err уже проверен выше — гарантированно непуст, когда info == None
-    # (см. resolve_video_or_playlist); проверка оставлена defensively.
-    if not info:
-        return jsonify({"error": "Не удалось получить информацию о видео."}), 400
-
-    title = info.get("title") or "video"
-    duration = info.get("duration") or 0
-    # Максимальная доступная высота (исходное разрешение).
-    src_height = info.get("height") or 0
-    if not src_height:
-        src_height = max((f.get("height") or 0)
-                         for f in (info.get("formats") or [{}]))
+    # Метаданные добываются в фоне (см. п.1): запрос сразу отдаёт job_id, фронт
+    # опрашивает /api/status и забирает результат из /api/fetch_result.
     job_id = uuid.uuid4().hex[:12]
     core.cleanup_old_jobs()
+    job = core.new_job({"status": "fetching", "title": "", "url": url,
+                        "stage": "Получаю информацию…"})
     with core.JOBS_LOCK:
-        core.JOBS[job_id] = core.new_job({
-            "status": "ready", "title": title, "url": url, "duration": duration,
-            "src_height": src_height, "video_id": info.get("id") or "",
-        })
-    return jsonify({"job_id": job_id, "title": title, "duration": duration,
-                    "src_height": src_height})
+        core.JOBS[job_id] = job
+    threading.Thread(target=_fetch_thread, args=(job_id, job, url), daemon=True).start()
+    return jsonify({"job_id": job_id, "pending": True})
+
+
+@bp.route("/api/fetch_result/<job_id>")
+def api_fetch_result(job_id):
+    """Результат фоновой добычи метаданных (см. /api/fetch)."""
+    with core.JOBS_LOCK:
+        job = core.JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "not found"}), 404
+        status = job.get("status")
+        if status == "error":
+            return jsonify({"error": job.get("error") or "Не удалось получить информацию."}), 400
+        if status == "canceled":
+            return jsonify({"error": "Отменено."}), 400
+        if status != "ready":
+            return jsonify({"error": "Информация ещё не готова.", "pending": True}), 202
+        return jsonify({"job_id": job_id, "title": job.get("title") or "video",
+                        "duration": job.get("duration") or 0,
+                        "src_height": job.get("src_height") or 0})
 
 
 @bp.route("/api/start", methods=["POST"])

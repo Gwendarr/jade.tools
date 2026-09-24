@@ -314,7 +314,8 @@ State-changing POST-запросы защищены от чужих сайтов
 | Метод | Путь | `{payload}` → ответ |
 |-------|------|------|
 | POST | `/compress/api/upload` | файл (multipart) → `job_id`, длительность, исходная высота |
-| POST | `/compress/api/fetch` | `{url}` → метаданные YouTube + `video_id` |
+| POST | `/compress/api/fetch` | `{url}` → `{job_id, pending: true}`: метаданные уходят в фон (см. п.1), результат — через `/compress/api/fetch_result/<job_id>` |
+| GET  | `/compress/api/fetch_result/<job_id>` | метаданные видео (title, duration, src_height); `202`, пока не готово |
 | POST | `/compress/api/start` | `{job_id, target_mb, audio_kbps, height}` → запуск двухпроходного сжатия |
 
 Целевой битрейт считается из `target_mb` и длительности (запас 3% на
