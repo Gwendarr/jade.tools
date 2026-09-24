@@ -57,6 +57,11 @@ _PEAK_SR = 8000
 _FILMSTRIP_FRAMES = 120
 _FILMSTRIP_HEIGHT = 90       # высота кадра полосы, px
 
+# Общие с compress.py параметры расчёта размера и микро-fade на краях реза.
+_SIZE_OVERHEAD = 0.97
+_MIN_VIDEO_KBPS = 50
+_FADE_SECONDS = 0.012
+
 
 # --- Анализ источника --------------------------------------------------------
 
@@ -399,7 +404,7 @@ def _trim_thread(job_id, job):
                          job.get("title"), start, end, mode, bool(job.get("compress")))
 
         # Микро-fade аудио на краях — убирает щелчки.
-        fade = 0.012
+        fade = _FADE_SECONDS
         afade = (f"afade=t=in:st=0:d={fade},afade=t=out:st={dur - fade:.3f}:d={fade}"
                  if dur > 4 * fade else None)
 
@@ -428,9 +433,9 @@ def _trim_thread(job_id, job):
             target_mb = float(job["target_mb"])
             audio_kbps = int(job.get("audio_kbps") or 128)
             c_height = int(job.get("c_height") or 0)
-            total_kbps = (target_mb * 8192) / dur * 0.97
+            total_kbps = (target_mb * 8192) / dur * _SIZE_OVERHEAD
             video_kbps = total_kbps - audio_kbps
-            if video_kbps < 50:
+            if video_kbps < _MIN_VIDEO_KBPS:
                 job["status"] = "error"
                 job["error"] = ("Целевой размер слишком мал для длины фрагмента. "
                                 "Увеличьте размер или уменьшите битрейт звука.")

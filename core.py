@@ -1716,6 +1716,11 @@ _RELEASE_REPOS = {
     "deno": "denoland/deno",
 }
 
+# Точные имена файлов-ассетов в последних релизах (внешний контракт GitHub
+# Releases — при смене имени установка сломается; править только здесь).
+_DENO_ASSET = "deno-x86_64-pc-windows-msvc.zip"
+_FFMPEG_ASSET = "ffmpeg-master-latest-win64-gpl.zip"
+
 # Порядок скачивания — качаем ПОСЛЕДОВАТЕЛЬНО (не параллельно), чтобы пиковое
 # место на диске определялось самой тяжёлой операцией (ffmpeg), а не суммой
 # всех сразу; ffmpeg — последним, чтобы к моменту самого долгого шага
@@ -1866,7 +1871,7 @@ def _install_deno(job, base, span, work_dir):
     release = _github_latest_release(repo)
     if not release:
         return f"Не удалось получить список релизов Deno. Скачайте вручную: {release_page_url('deno')}"
-    asset_name = "deno-x86_64-pc-windows-msvc.zip"
+    asset_name = _DENO_ASSET
     asset = _find_asset(release, asset_name)
     if not asset:
         return f"Файл {asset_name} не найден в последнем релизе. Скачайте вручную: {release_page_url('deno')}"
@@ -1897,7 +1902,7 @@ def _install_ffmpeg(job, base, span, work_dir):
         return f"Не удалось получить список релизов ffmpeg. Скачайте вручную: {release_page_url('ffmpeg')}"
     # Строго БЕЗ суффикса -shared: shared-сборка требует сопутствующие av*.dll
     # и без них не запускается, static (эта) — самодостаточна.
-    asset_name = "ffmpeg-master-latest-win64-gpl.zip"
+    asset_name = _FFMPEG_ASSET
     asset = _find_asset(release, asset_name)
     if not asset:
         return f"Файл {asset_name} не найден в последнем релизе. Скачайте вручную: {release_page_url('ffmpeg')}"

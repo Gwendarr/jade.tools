@@ -29,6 +29,12 @@ TOOL = {
              'M16 21v-3a2 2 0 0 1 2-2h3"/></svg>'),
 }
 
+# Запас на накладные расходы контейнера при расчёте битрейта под целевой размер
+# и минимальный битрейт видео, ниже которого сжатие теряет смысл.
+_SIZE_OVERHEAD = 0.97
+_MIN_VIDEO_KBPS = 50
+
+
 def _download_source(job_id, job, url):
     """Скачивает исходное видео (видео+звук, mp4) для последующего сжатия.
 
@@ -121,9 +127,9 @@ def _compress_thread(job_id, job):
         if target_mb > 0:
             # 3. Целевой битрейт: размер(МБ)*8192 кбит / длительность(с).
             #    Запас 3% на накладные расходы контейнера.
-            total_kbps = (target_mb * 8192) / duration * 0.97
+            total_kbps = (target_mb * 8192) / duration * _SIZE_OVERHEAD
             video_kbps = total_kbps - audio_kbps
-            if video_kbps < 50:
+            if video_kbps < _MIN_VIDEO_KBPS:
                 job["status"] = "error"
                 job["error"] = (f"Целевой размер слишком мал для длительности "
                                 f"{int(duration)} с. Увеличьте размер или уменьшите "
