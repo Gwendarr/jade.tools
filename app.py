@@ -317,16 +317,36 @@ def api_file(job_id):
 
 # --- Запуск ------------------------------------------------------------------
 
+def _handle_exit_signal(*_):
+    """Обработчик Ctrl+C (SIGINT), Ctrl+Break (SIGBREAK) и SIGTERM: убрать
+    временные файлы и ГАРАНТИРОВАННО завершить процесс.
+
+    Раньше обработчик только вызывал cleanup_all_jobs() и возвращался — Python
+    считал сигнал обработанным и НЕ прерывал сервер, поэтому подсказка «Чтобы
+    остановить — Ctrl+C» не срабатывала. os._exit() доводит выход до конца
+    независимо от того, чем занят главный поток."""
+    try:
+        core.cleanup_all_jobs()
+        core.logger.info("Сервер остановлен (signal).")
+    except Exception:
+        pass
+    os._exit(0)
+
+
 def main():
     host = os.environ.get("YTD_HOST", "127.0.0.1")
     # YTD_PORT — основная переменная; PORT поддержан как стандартный фоллбэк
     # (его задают многие хостинги и dev-обёртки).
     port = int(os.environ.get("YTD_PORT") or os.environ.get("PORT") or "5000")
 
-    signal.signal(signal.SIGINT, lambda *_: core.cleanup_all_jobs())
-    if hasattr(signal, "SIGTERM"):
+    # SIGINT (Ctrl+C), SIGBREAK (Ctrl+Break, только Windows) и SIGTERM —
+    # единый обработчик, который реально завершает процесс.
+    for _sig_name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        _sig = getattr(signal, _sig_name, None)
+        if _sig is None:
+            continue
         try:
-            signal.signal(signal.SIGTERM, lambda *_: core.cleanup_all_jobs())
+            signal.signal(_sig, _handle_exit_signal)
         except Exception:
             pass
 
