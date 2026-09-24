@@ -577,9 +577,50 @@ def api_upload():
     return jsonify({"job_id": job_id})
 
 
+def _info_thread(job_id, job, url):
+    """Фоновая добыча метаданных для /trim/api/info (см. п.1)."""
+    try:
+        is_pl, info, err = core.resolve_video_or_playlist(url)
+        if err:
+            with core.JOBS_LOCK:
+                job["status"] = "error"
+                job["error"] = err
+            return
+        if is_pl:
+            with core.JOBS_LOCK:
+                job["status"] = "error"
+                job["error"] = ("Ссылки на плейлисты поддерживаются только "
+                                "в разделе «скачать».")
+            return
+        if not info:
+            with core.JOBS_LOCK:
+                job["status"] = "error"
+                job["error"] = "Не удалось получить информацию."
+            return
+        heights = _summarize_heights(info)
+        with core.JOBS_LOCK:
+            job.update({
+                "status": "ready", "stage": "",
+                "title": info.get("title") or "media",
+                "url": url, "duration": info.get("duration") or 0,
+                "has_video": bool(heights), "video_id": info.get("id") or "",
+                "uploader": info.get("uploader") or "",
+                "thumbnail": info.get("thumbnail") or "",
+                "heights": heights,
+            })
+    except Exception as e:
+        core.logger.error("Нарезать: исключение при получении информации (%s): %s", url, e)
+        with core.JOBS_LOCK:
+            job["status"] = "error"
+            job["error"] = f"{type(e).__name__}: {e}"
+
+
 @bp.route("/api/info", methods=["POST"])
 def api_info():
-    """Метаданные YouTube-ролика (без скачивания): тип, длительность, высоты."""
+    """Метаданные YouTube-ролика (без скачивания): тип, длительность, высоты.
+
+    Само получение — в фоне (см. п.1): запрос возвращает job_id, фронт
+    опрашивает /api/status и забирает результат из /api/info_result."""
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
     if not url:
@@ -587,39 +628,37 @@ def api_info():
     if not core.is_supported_url(url):
         return jsonify({"error": "Поддерживаются только ссылки http:// или https://."}), 400
 
-    # core.resolve_video_or_playlist() объединяет быструю проверку --flat-playlist
-    # (без неё полный dump-single-json на ссылке-плейлисте утыкается в таймаут)
-    # и получение полных метаданных одиночного видео в один проход.
-    is_pl, info, err = core.resolve_video_or_playlist(url)
-    if err:
-        return jsonify({"error": err}), 400
-    if is_pl:
-        return jsonify({"error": "Ссылки на плейлисты поддерживаются только "
-                                 "в разделе «скачать»."}), 400
-    # err уже проверен выше — гарантированно непуст, когда info == None
-    # (см. resolve_video_or_playlist); проверка оставлена defensively.
-    if not info:
-        return jsonify({"error": "Не удалось получить информацию."}), 400
-
-    heights = _summarize_heights(info)
     job_id = uuid.uuid4().hex[:12]
     core.cleanup_old_jobs()
+    job = core.new_job({"status": "fetching", "title": "", "url": url,
+                        "stage": "Получаю информацию…"})
     with core.JOBS_LOCK:
-        job = core.new_job({
-            "status": "ready", "title": info.get("title") or "media",
-            "url": url, "duration": info.get("duration") or 0,
-            "has_video": bool(heights), "video_id": info.get("id") or "",
-            "uploader": info.get("uploader") or "",
-            "thumbnail": info.get("thumbnail") or "",
-        })
         core.JOBS[job_id] = job
-    return jsonify({
-        "job_id": job_id,
-        "title": job["title"],
-        "duration": job["duration"],
-        "has_video": bool(heights),
-        "heights": heights,
-    })
+    threading.Thread(target=_info_thread, args=(job_id, job, url), daemon=True).start()
+    return jsonify({"job_id": job_id, "pending": True})
+
+
+@bp.route("/api/info_result/<job_id>")
+def api_info_result(job_id):
+    """Результат фонового получения метаданных (см. /trim/api/info)."""
+    with core.JOBS_LOCK:
+        job = core.JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "not found"}), 404
+        status = job.get("status")
+        if status == "error":
+            return jsonify({"error": job.get("error") or "Не удалось получить информацию."}), 400
+        if status == "canceled":
+            return jsonify({"error": "Отменено."}), 400
+        if status != "ready":
+            return jsonify({"error": "Информация ещё не готова.", "pending": True}), 202
+        return jsonify({
+            "job_id": job_id,
+            "title": job.get("title") or "media",
+            "duration": job.get("duration") or 0,
+            "has_video": bool(job.get("has_video")),
+            "heights": job.get("heights") or [],
+        })
 
 
 @bp.route("/api/prepare", methods=["POST"])

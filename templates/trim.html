@@ -342,6 +342,25 @@ function escapeHtml(s){
     {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
   ));
 }
+async function waitForInfo(jobId, msgEl){
+  // /trim/api/info теперь фоновое (п.1): ждём готовности через /api/status
+  // (показывая этап), затем забираем результат из /trim/api/info_result.
+  while(true){
+    let s;
+    try{ s = await (await fetch("/api/status/" + jobId)).json(); }
+    catch(e){ throw new Error("Не удалось получить статус."); }
+    if(s.status === "error") throw new Error(s.error || "Не удалось получить информацию.");
+    if(s.status === "canceled") throw new Error("Отменено.");
+    if(s.status === "ready"){
+      const r = await fetch("/trim/api/info_result/" + jobId);
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.error || "Не удалось получить информацию.");
+      return d;
+    }
+    setMsg(msgEl, s.stage || "получаю информацию…", "");
+    await new Promise(z=>setTimeout(z, 400));
+  }
+}
 function fmtTime(s, tenths){
   s = Math.max(0, s||0);
   const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), whole = Math.floor(s%60);
@@ -469,10 +488,11 @@ $("btnFetch").addEventListener("click", async ()=>{
     const res = await fetch("/trim/api/info", {
       method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({url})
     });
-    const d = await res.json();
-    if(!res.ok) throw new Error(d.error || "Ошибка");
-    parsedTimestampSec = parseTimestampFromUrl(url);
+    const start = await res.json();
+    if(!res.ok) throw new Error(start.error || "Ошибка");
+    const d = await waitForInfo(start.job_id, $("srcMsg"));
     setMsg($("srcMsg"), "", "");
+    parsedTimestampSec = parseTimestampFromUrl(url);
     showQuality(d);
   }catch(e){ setMsg($("srcMsg"), e.message, "err"); }
   finally{ b.disabled = false; b.classList.remove("is-loading"); b.textContent = "получить"; }

@@ -345,7 +345,8 @@ State-changing POST-запросы защищены от чужих сайтов
 |-------|------|-----------|
 | GET  | `/trim/api/formats` | список аудио/видео форматов вывода |
 | POST | `/trim/api/upload` | файл (multipart) → `job_id`, фоновый анализ запускается сразу |
-| POST | `/trim/api/info` | `{url}` → метаданные YouTube без скачивания (длительность, доступные высоты, `video_id`) |
+| POST | `/trim/api/info` | `{url}` → `{job_id, pending: true}`: метаданные уходят в фон (см. п.1), результат — через `/trim/api/info_result/<job_id>` |
+| GET  | `/trim/api/info_result/<job_id>` | метаданные без скачивания (title, duration, has_video, heights); `202`, пока не готово |
 | POST | `/trim/api/prepare` | `{job_id, height}` → скачать ролик во временную папку (или взять из кэша) и проанализировать |
 | GET  | `/trim/api/data/<job_id>` | волна, видео/аудио-флаги, fps, список аудиодорожек, разрешение |
 | GET  | `/trim/api/media/<job_id>?a=<idx>` | исходник для плеера; `a=<idx>` — версия с конкретной аудиодорожкой (ремукс без перекодирования, кэшируется на диске) |
