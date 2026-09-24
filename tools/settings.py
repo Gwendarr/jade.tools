@@ -63,15 +63,33 @@ def _validate(key, value):
     return None
 
 
-def _path_row(mode, custom_path, app_fn, system_fn, available, configured_path):
+def _path_row(mode, custom_path, app_fn, system_fn, available, configured_path,
+              is_own=None):
     """Данные одной строки (temp или cache) для трёхрежимного UI: реальный
     путь-кандидат для КАЖДОГО режима (чтобы поле пути показывало актуальный
     путь сразу при переключении дропдауна, без похода на сервер) + текущий
-    статус доступности настроенного режима."""
+    статус доступности настроенного режима.
+
+    foreign — True, если режим «свой путь» и в папке есть посторонние элементы
+    (не созданные приложением). Только подсказка в UI: очистка и так чужие
+    каталоги не трогает (см. REL-1). Просматриваются первые 100 записей —
+    этого достаточно для подсказки и дёшево на каждом запросе."""
+    foreign = False
+    if mode == "custom" and available and is_own is not None:
+        try:
+            for i, entry in enumerate(Path(configured_path).iterdir()):
+                if i >= 100:
+                    break
+                if not is_own(entry.name):
+                    foreign = True
+                    break
+        except Exception:
+            foreign = False
     return {
         "mode": mode, "custom_path": custom_path or "",
         "app_path": str(app_fn()), "system_path": str(system_fn()),
         "available": available, "configured_path": str(configured_path),
+        "foreign": foreign,
     }
 
 
@@ -80,10 +98,12 @@ def _paths():
     return {
         "temp": _path_row(s["temp_mode"], s["temp_custom_path"],
                           core.default_temp_dir, core.system_temp_dir,
-                          core.TEMP_AVAILABLE, core.TEMP_CONFIGURED_PATH),
+                          core.TEMP_AVAILABLE, core.TEMP_CONFIGURED_PATH,
+                          core.is_app_job_dir),
         "cache": _path_row(s["cache_mode"], s["cache_custom_path"],
                            core.default_cache_dir, core.system_cache_dir,
-                           core.CACHE_AVAILABLE, core.CACHE_CONFIGURED_PATH),
+                           core.CACHE_AVAILABLE, core.CACHE_CONFIGURED_PATH,
+                           core.is_cache_dir),
     }
 
 
@@ -176,7 +196,9 @@ def _pick(kind):
         except Exception as e:
             result["error"] = str(e)
 
-    t = threading.Thread(target=run)
+    # daemon=True: если пользователь оставит диалог открытым дольше 180 с,
+    # застрявший поток tkinter не должен мешать завершению приложения.
+    t = threading.Thread(target=run, daemon=True)
     t.start()
     t.join(timeout=180)
     return result.get("path") or "", result.get("error")

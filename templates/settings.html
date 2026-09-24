@@ -214,6 +214,7 @@
         <button class="ghost" id="temp_path_btn">открыть</button>
       </div>
       <div class="err" data-err="temp_custom_path" id="temp_err"></div>
+      <div class="hintmuted" id="temp_hint"></div>
     </div>
 
     <div class="field">
@@ -228,6 +229,7 @@
         <button class="ghost" id="cache_path_btn">открыть</button>
       </div>
       <div class="err" data-err="cache_custom_path" id="cache_err"></div>
+      <div class="hintmuted" id="cache_hint"></div>
     </div>
 
     <div class="field">
@@ -504,6 +506,10 @@ function renderPathRow(kind, data){
   const invalid = !data.available;
   row.classList.toggle("path-invalid", invalid);
   err.textContent = invalid ? `папка недоступна: ${data.configured_path}` : "";
+  const hint = $(kind + "_hint");
+  hint.textContent = (!invalid && data.foreign)
+    ? "папка не пуста: jade.tools использует и очищает только свои подпапки, остальное не трогает"
+    : "";
 }
 
 ["temp", "cache"].forEach(kind=>{
