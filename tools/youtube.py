@@ -313,6 +313,26 @@ def _download_thread(job_id, job, url):
         core.logger.error("Скачать: исключение (%s): %s", url, e)
 
 
+def _pack_playlist_zip(done_files, archive_path):
+    """Упаковать успешно скачанные файлы плейлиста в один zip.
+
+    done_files — [(job_id, path, download_name), ...]. Имена внутри архива
+    уникализируются: дубли получают суффикс « (N)». ZIP_STORED — видео уже
+    сжато. Возвращает archive_path."""
+    used_names = set()
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED) as zf:
+        for _cid, path, dl_name in done_files:
+            name = dl_name or Path(path).name
+            stem, ext = Path(name).stem, Path(name).suffix
+            final_name, i = name, 1
+            while final_name in used_names:
+                final_name = f"{stem} ({i}){ext}"
+                i += 1
+            used_names.add(final_name)
+            zf.write(path, arcname=final_name)
+    return archive_path
+
+
 def _download_playlist_thread(parent_id, delivery, concurrency=None):
     """Оркестратор плейлиста: качает отмеченные видео — параллельно, не более
     `concurrency` одновременно (None = без ограничения), по одной задаче на
@@ -409,17 +429,7 @@ def _download_playlist_thread(parent_id, delivery, concurrency=None):
     archive_name = f"{playlist_title} [{len(done_files)} ep].zip"
     archive_path = work / archive_name
     try:
-        used_names = set()
-        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_STORED) as zf:
-            for _cid, path, dl_name in done_files:
-                name = dl_name or Path(path).name
-                stem, ext = Path(name).stem, Path(name).suffix
-                final_name, i = name, 1
-                while final_name in used_names:
-                    final_name = f"{stem} ({i}){ext}"
-                    i += 1
-                used_names.add(final_name)
-                zf.write(path, arcname=final_name)
+        _pack_playlist_zip(done_files, archive_path)
 
         with core.JOBS_LOCK:
             parent["filename"] = str(archive_path)
