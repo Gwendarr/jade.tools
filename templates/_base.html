@@ -329,6 +329,35 @@ document.addEventListener("DOMContentLoaded", ()=>{
   });
 });
 </script>
+<script>
+/* Общие хелперы страниц инструментов (раньше escapeHtml и waitForInfo
+   копировались в каждом шаблоне). Определены в <head>, поэтому доступны
+   инлайн-скриптам страниц ниже по документу. */
+window.escapeHtml = function(s){
+  return String(s||"").replace(/[&<>"']/g, c => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+  ));
+};
+window.waitForInfo = async function(jobId, resultUrl, msgEl){
+  // Фоновые /api/info|fetch (п.1): опрос /api/status, затем результат по
+  // resultUrl. Этап показываем в msgEl (класс .msg из _base).
+  while(true){
+    let s;
+    try{ s = await (await fetch("/api/status/" + jobId)).json(); }
+    catch(e){ throw new Error("Не удалось получить статус."); }
+    if(s.status === "error") throw new Error(s.error || "Не удалось получить информацию.");
+    if(s.status === "canceled") throw new Error("Отменено.");
+    if(s.status === "ready"){
+      const r = await fetch(resultUrl + jobId);
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.error || "Не удалось получить информацию.");
+      return d;
+    }
+    if(msgEl) msgEl.innerHTML = '<div class="msg">' + window.escapeHtml(s.stage || "получаю информацию…") + "</div>";
+    await new Promise(z=>setTimeout(z, 400));
+  }
+};
+</script>
 {% block head %}{% endblock %}
 </head>
 <body>
