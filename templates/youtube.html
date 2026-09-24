@@ -270,7 +270,7 @@ function renderInfo(info){
   $("playlistPreview").classList.add("hidden");
   $("deliveryWrap").classList.add("hidden");
   $("preview").innerHTML = `
-    ${info.thumbnail ? `<img src="${info.thumbnail}" alt="">` : ""}
+    ${info.thumbnail ? `<img src="${escapeHtml(info.thumbnail)}" alt="">` : ""}
     <div class="meta">
       <h3>${escapeHtml(info.title)}</h3>
       ${info.uploader ? `<div class="sub">${ICONS.user} ${escapeHtml(info.uploader)}</div>`:""}
@@ -303,7 +303,7 @@ function renderPlaylist(state){
     row.className = "pl-row";
     row.innerHTML = `
       <input type="checkbox" checked>
-      <img src="${e.thumbnail||""}" alt="" loading="lazy">
+      <img src="${escapeHtml(e.thumbnail||"")}" alt="" loading="lazy">
       <div class="pl-meta">
         <div class="t">${escapeHtml(e.title)}</div>
         <div class="u">${escapeHtml(e.uploader||"")}</div>
