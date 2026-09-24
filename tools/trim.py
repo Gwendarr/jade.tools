@@ -535,8 +535,8 @@ def api_upload():
         core.logger.warning("Нарезать: не удалось сохранить загруженный файл: %s", e)
         return jsonify({"error": "Не удалось сохранить загруженный файл."}), 400
 
+    core.cleanup_old_jobs()
     with core.JOBS_LOCK:
-        core.cleanup_old_jobs()
         job = core.new_job({"status": "pending", "title": f.filename})
         core.JOBS[job_id] = job
 
@@ -572,8 +572,8 @@ def api_info():
 
     heights = _summarize_heights(info)
     job_id = uuid.uuid4().hex[:12]
+    core.cleanup_old_jobs()
     with core.JOBS_LOCK:
-        core.cleanup_old_jobs()
         job = core.new_job({
             "status": "ready", "title": info.get("title") or "media",
             "url": url, "duration": info.get("duration") or 0,

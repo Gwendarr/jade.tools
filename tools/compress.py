@@ -249,8 +249,8 @@ def api_upload():
     _w, src_height = core.ffprobe_resolution(dst)
     size_mb = dst.stat().st_size / (1024 * 1024)
 
+    core.cleanup_old_jobs()
     with core.JOBS_LOCK:
-        core.cleanup_old_jobs()
         core.JOBS[job_id] = core.new_job({
             "status": "ready", "title": f.filename,
             "src_path": str(dst), "duration": duration,
@@ -292,8 +292,8 @@ def api_fetch():
         src_height = max((f.get("height") or 0)
                          for f in (info.get("formats") or [{}]))
     job_id = uuid.uuid4().hex[:12]
+    core.cleanup_old_jobs()
     with core.JOBS_LOCK:
-        core.cleanup_old_jobs()
         core.JOBS[job_id] = core.new_job({
             "status": "ready", "title": title, "url": url, "duration": duration,
             "src_height": src_height, "video_id": info.get("id") or "",

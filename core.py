@@ -1120,12 +1120,19 @@ def job_dir(job_id):
 
 
 def cleanup_old_jobs():
-    """Удаляет файлы и записи старых завершённых задач. Вызывать под JOBS_LOCK."""
-    terminal = [jid for jid, j in JOBS.items()
-                if j["status"] in ("done", "error", "canceled")]
-    for jid in terminal[_MAX_DONE_JOBS:]:
+    """Удаляет файлы и записи старых завершённых задач.
+
+    JOBS_LOCK берёт САМ (вызывать НЕ под локом), а удаление с диска делает уже
+    ВНЕ лока: иначе rmtree больших папок блокировал бы /api/status и опрос
+    прогресса в UI (см. п.3). Записи из JOBS убираются под локом сразу."""
+    with JOBS_LOCK:
+        terminal = [jid for jid, j in JOBS.items()
+                    if j["status"] in ("done", "error", "canceled")]
+        victims = terminal[_MAX_DONE_JOBS:]
+        for jid in victims:
+            JOBS.pop(jid, None)
+    for jid in victims:
         shutil.rmtree(DOWNLOADS_DIR / jid, ignore_errors=True)
-        del JOBS[jid]
 
 
 def cleanup_all_jobs(*_):
@@ -1984,12 +1991,12 @@ def start_install_job(targets):
     targets = [t for t in targets if t in _INSTALLERS]
     if not targets:
         return None
+    cleanup_old_jobs()
     with JOBS_LOCK:
         existing_id, _ = active_install_job()
         if existing_id:
             logger.info("Установка зависимостей: уже идёт (job %s) — повторный запуск пропущен", existing_id)
             return existing_id
-        cleanup_old_jobs()
         job_id = uuid.uuid4().hex[:12]
         job = new_job({"status": "downloading", "progress": 0.0, "kind": "install",
                        "title": "Установка зависимостей", "stage": "Подготовка…"})

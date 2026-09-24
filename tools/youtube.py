@@ -471,8 +471,8 @@ def api_info():
         if not pl["entries"]:
             return jsonify({"error": "Плейлист пуст или все видео в нём недоступны."}), 400
         job_id = uuid.uuid4().hex[:12]
+        core.cleanup_old_jobs()
         with core.JOBS_LOCK:
-            core.cleanup_old_jobs()
             core.JOBS[job_id] = core.new_job({
                 "status": "ready", "title": pl["title"],
                 "is_playlist": True, "playlist_entries": pl["entries"],
@@ -489,8 +489,8 @@ def api_info():
 
     summary = _summarize_info(info)
     job_id = uuid.uuid4().hex[:12]
+    core.cleanup_old_jobs()
     with core.JOBS_LOCK:
-        core.cleanup_old_jobs()
         core.JOBS[job_id] = core.new_job({
             "status": "ready", "title": summary["title"], "info": summary,
             "video_id": info.get("id") or "",
