@@ -60,32 +60,62 @@ _FILMSTRIP_HEIGHT = 90       # высота кадра полосы, px
 
 # --- Анализ источника --------------------------------------------------------
 
-def _generate_peaks(path, audio_index=0, buckets=_PEAK_BUCKETS):
-    """Огибающая громкости выбранной аудиодорожки: значения 0..1 (пусто без звука)."""
+def _generate_peaks(path, audio_index=0, buckets=_PEAK_BUCKETS, duration=0.0):
+    """Огибающая громкости выбранной аудиодорожки: значения 0..1 (пусто без звука).
+
+    Вывод ffmpeg читается потоково (OPT-2) — весь PCM в память не кладётся,
+    только чанк и текущая корзина. Размер корзины берётся из duration (при
+    неизвестной — секунда), чтобы число точек осталось примерно как раньше."""
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             [core.FFMPEG_BIN, "-v", "error", "-i", str(path),
              "-map", f"0:a:{audio_index}?",
              "-ac", "1", "-ar", str(_PEAK_SR), "-f", "s16le", "-"],
-            capture_output=True, timeout=300, creationflags=core._NO_WINDOW,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            creationflags=core._NO_WINDOW,
         )
     except Exception:
         return []
-    raw = proc.stdout
-    if not raw:
-        return []
-    samples = array.array("h")
-    samples.frombytes(raw[: len(raw) // 2 * 2])
-    n = len(samples)
-    if n == 0:
-        return []
-    bucket = max(1, n // buckets)
+
+    bucket = max(1, int(duration * _PEAK_SR) // buckets) if duration > 0 else _PEAK_SR
     peaks = []
-    for i in range(0, n, bucket):
-        chunk = samples[i:i + bucket]
-        if not chunk:
-            break
-        peaks.append(max(max(chunk), -min(chunk)))
+    buf = array.array("h")     # текущая неполная корзина
+    pending = b""              # непарный байт между чанками (s16le)
+    try:
+        while True:
+            chunk = proc.stdout.read(1 << 16)
+            if not chunk:
+                break
+            data = pending + chunk
+            usable = len(data) - (len(data) % 2)
+            pending = data[usable:]
+            if usable:
+                buf.frombytes(data[:usable])
+                while len(buf) >= bucket:
+                    part = buf[:bucket]
+                    del buf[:bucket]
+                    peaks.append(max(max(part), -min(part)))
+        if pending:
+            buf.frombytes(pending[: len(pending) - (len(pending) % 2)])
+        if len(buf):
+            peaks.append(max(max(buf), -min(buf)))
+    except Exception:
+        return []
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    if not peaks:
+        return []
     mx = max(peaks) or 1
     return [round(p / mx, 3) for p in peaks]
 
@@ -177,10 +207,11 @@ def _analyze_source(job, src):
     has_video = _has_real_video(src)
     w, h = core.ffprobe_resolution(src) if has_video else (0, 0)
     fps = _ffprobe_fps(src) if has_video else 0.0
-    peaks = _generate_peaks(src)
+    peaks = _generate_peaks(src, duration=duration)
     audio_tracks = _ffprobe_audio_tracks(src)
     # Полосу кадров генерим не заранее, а по запросу под видимый участок (зум).
 
+    job.pop("peaks_cache", None)   # источник мог смениться — кэш волны невалиден
     job["src_path"] = str(src)
     job["duration"] = duration
     job["has_video"] = has_video
@@ -673,9 +704,18 @@ def api_peaks(job_id):
         if not job or not job.get("src_path"):
             abort(404)
         src = Path(job["src_path"])
+        duration = float(job.get("duration") or 0)
+        cached = (job.get("peaks_cache") or {}).get(a)
     if not src.is_file():
         abort(404)
-    return jsonify({"peaks": _generate_peaks(src, a)})
+    if cached is not None:
+        return jsonify({"peaks": cached})
+    # Считаем ВНЕ лока: декодирование ffmpeg не должно блокировать /api/status.
+    peaks = _generate_peaks(src, a, duration=duration)
+    with core.JOBS_LOCK:
+        if core.JOBS.get(job_id) is job:
+            job.setdefault("peaks_cache", {})[a] = peaks
+    return jsonify({"peaks": peaks})
 
 
 @bp.route("/api/filmstrip/<job_id>")
