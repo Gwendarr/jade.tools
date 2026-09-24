@@ -1112,7 +1112,17 @@ def cleanup_old_jobs():
 
 
 def cleanup_all_jobs(*_):
-    """Удаляет все временные папки задач (при выходе из приложения)."""
+    """Останавливает активные дочерние процессы (yt-dlp/ffmpeg) и удаляет все
+    временные папки задач — при выходе из приложения. Лок не берём: функция
+    вызывается и из обработчика сигнала, где захват JOBS_LOCK мог бы дать
+    взаимоблокировку, если сигнал пришёл, пока поток держит лок (см. REL-4)."""
+    procs = [job.get("proc") for job in list(JOBS.values()) if job.get("proc")]
+    for proc in procs:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except Exception:
+            pass
     try:
         for job_id in list(JOBS):
             shutil.rmtree(DOWNLOADS_DIR / job_id, ignore_errors=True)
