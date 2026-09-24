@@ -68,6 +68,53 @@ import tools.rq7 as _rq7_page
 app.register_blueprint(_rq7_page.bp)
 
 
+# --- Защита POST от чужих сайтов (CSRF/DNS-rebinding, SEC-3) -----------------
+# Приложение локальное и без аутентификации, поэтому state-changing запрос с
+# произвольного сайта (обычная HTML-форма) или через DNS-rebinding проходить
+# не должен. Браузерные запросы с чужого origin отсекаются по Origin/
+# Sec-Fetch-Site, чужой Host — по allowlist. Клиенты без этих заголовков
+# (curl, скрипты) не блокируются, чтобы не мешать ручной работе.
+_ENV_HOST = (os.environ.get("YTD_HOST") or "").strip().lower()
+_ALLOWED_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+if _ENV_HOST and _ENV_HOST not in ("0.0.0.0", "::"):
+    _ALLOWED_HOSTNAMES.add(_ENV_HOST)
+# При бинде на все интерфейсы (0.0.0.0) заранее неизвестно, по какому имени
+# придёт браузер, — Host-allowlist тогда не применяем (Origin/Sec-Fetch-Site
+# продолжают действовать).
+_HOST_CHECK_ENABLED = _ENV_HOST != "0.0.0.0"
+
+
+def _hostname_of(value):
+    """Имя хоста без схемы/порта ('' — если разобрать не удалось).
+
+    Принимает и Host ('127.0.0.1:5000'), и Origin ('http://localhost:5000')."""
+    if not value:
+        return ""
+    raw = value.strip()
+    if "://" in raw:
+        raw = urlparse(raw).netloc or ""
+    raw = raw.rsplit("@", 1)[-1]           # userinfo, на всякий случай
+    if raw.startswith("["):                # IPv6: [::1]:5000
+        return raw[1:].split("]", 1)[0].lower()
+    return raw.split(":", 1)[0].lower()
+
+
+@app.before_request
+def _block_foreign_requests():
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    if _HOST_CHECK_ENABLED:
+        host = _hostname_of(request.headers.get("Host"))
+        if host and host not in _ALLOWED_HOSTNAMES:
+            return jsonify({"error": "Запрос с недопустимого Host отклонён."}), 403
+    if (request.headers.get("Sec-Fetch-Site") or "").strip().lower() == "cross-site":
+        return jsonify({"error": "Запрос с постороннего сайта отклонён."}), 403
+    origin = request.headers.get("Origin")
+    if origin and _hostname_of(origin) not in _ALLOWED_HOSTNAMES:
+        return jsonify({"error": "Запрос с постороннего сайта отклонён."}), 403
+    return None
+
+
 # При каждом переходе между страницами инструментов (в любую сторону) — шанс
 # 1 из 50 попасть на _rq7_page вместо запрошенного инструмента. Секретность —
 # см. tools/rq7.py и templates/rq7.html: сама вероятность не секрет, но её
