@@ -2010,6 +2010,10 @@ def _parse_ytdlp_version(v):
         return ()
 
 
+_PIP_INSTALLED_TTL = 300   # с — pip show не бесплатный, результат меняется редко
+_pip_installed_cache = {"ts": 0.0, "result": None}
+
+
 def _pip_launcher():
     """Первый доступный лаунчер Python с pip (`py -3` или `python`), видимый в
     PATH, или None. В собранном exe sys.executable — это сам jade.tools.exe, а
@@ -2020,21 +2024,31 @@ def _pip_launcher():
     return None
 
 
-def _ytdlp_pip_installed():
+def _ytdlp_pip_installed(force=False):
     """True, если yt-dlp виден pip'у (`pip show yt-dlp` завершился успешно) —
     единственный признак, отличающий pip-копию от установленной вручную/через
-    winget (см. ytdlp_source_kind: это разделение решает, как обновлять)."""
+    winget (см. ytdlp_source_kind: это разделение решает, как обновлять).
+
+    Результат кэшируется на _PIP_INSTALLED_TTL секунд (OPT-3): pip show —
+    внешний процесс, а вызывается это при каждом открытии настроек и при
+    проверке обновлений; состояние pip за это время практически не меняется."""
+    now = time.time()
+    if (not force and _pip_installed_cache["result"] is not None
+            and now - _pip_installed_cache["ts"] < _PIP_INSTALLED_TTL):
+        return _pip_installed_cache["result"]
+    result = False
     launcher = _pip_launcher()
-    if not launcher:
-        return False
-    try:
-        proc = subprocess.run(
-            launcher + ["-m", "pip", "show", "yt-dlp"],
-            capture_output=True, timeout=20, creationflags=_NO_WINDOW,
-        )
-        return proc.returncode == 0
-    except Exception:
-        return False
+    if launcher:
+        try:
+            proc = subprocess.run(
+                launcher + ["-m", "pip", "show", "yt-dlp"],
+                capture_output=True, timeout=20, creationflags=_NO_WINDOW,
+            )
+            result = proc.returncode == 0
+        except Exception:
+            result = False
+    _pip_installed_cache.update(ts=now, result=result)
+    return result
 
 
 def ytdlp_source_kind():
