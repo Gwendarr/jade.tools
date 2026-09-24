@@ -226,7 +226,7 @@ DEFAULT_SETTINGS = {
     # Раздел 1 — предпочтения скачивания
     "video_ext": "original",        # original|mp4|mov|webm|mkv
     "audio_ext": "mp3",             # mp3|wav|aac|opus
-    "compress_audio_kbps": 192,     # 128|192|256|320
+    "compress_audio_kbps": 192,     # 96|128|192|256|320
     "compress_target_mb": "",       # "" = не применять сжатие до размера
     "default_clip_length_for_timestamp_link": "",  # "" = маркер конца на всей
                                      # длительности; иначе — секунды, только
@@ -301,7 +301,9 @@ def _normalize_cookies_browser(value):
     return value if value in _VALID_COOKIE_BROWSERS else "firefox"
 
 
-_VALID_AUDIO_KBPS = (96, 128, 192, 256)
+# Допустимые значения битрейта аудио — объединение опций обоих UI:
+# settings.html (128/192/256/320) и compress/trim (96/128/192/256).
+_VALID_AUDIO_KBPS = (96, 128, 192, 256, 320)
 
 
 def _normalize_audio_kbps(value):
