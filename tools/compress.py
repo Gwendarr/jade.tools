@@ -278,6 +278,8 @@ def api_fetch():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "URL не указан"}), 400
+    if not core.is_supported_url(url):
+        return jsonify({"error": "Поддерживаются только ссылки http:// или https://."}), 400
 
     # core.resolve_video_or_playlist() объединяет быструю проверку --flat-playlist
     # (без неё полный dump-single-json на ссылке-плейлисте утыкается в таймаут)

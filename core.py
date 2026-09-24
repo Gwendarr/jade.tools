@@ -1280,6 +1280,17 @@ def _is_youtube_url(url):
     return "youtube.com" in host or "youtu.be" in host
 
 
+_ALLOWED_URL_SCHEMES = ("http://", "https://")
+
+
+def is_supported_url(url):
+    """True для ссылок http:// или https://. Только такие принимаются от
+    пользователя: это отсекает file:// и прочие схемы (SSRF/чтение локальных
+    файлов, см. SEC-11), а заодно строки, начинающиеся с "-", которые yt-dlp
+    иначе принял бы за свои опции (см. SEC-4)."""
+    return isinstance(url, str) and url.strip().lower().startswith(_ALLOWED_URL_SCHEMES)
+
+
 def ytdlp_cmd(*extra, no_playlist=True, cookies=False):
     """cookies=True подмешивает --cookies-from-browser/--cookies (см.
     cookies_args()) — вызывающий код сам решает, нужны ли они именно сейчас
@@ -1310,7 +1321,13 @@ def ytdlp_cmd(*extra, no_playlist=True, cookies=False):
     url = extra[-1] if extra and isinstance(extra[-1], str) else ""
     if _is_youtube_url(url):
         cmd += ["--remote-components", "ejs:github"]
-    cmd += list(extra)
+    # URL — последний позиционный аргумент. "--" завершает разбор опций,
+    # иначе строка, начинающаяся с "-", была бы исполнена yt-dlp как его
+    # собственная опция (например --exec=...), а не распознана как ссылка —
+    # см. SEC-4.
+    if extra:
+        cmd += list(extra[:-1])
+        cmd += ["--", extra[-1]]
     return cmd
 
 

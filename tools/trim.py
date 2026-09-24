@@ -342,6 +342,8 @@ def _fetch_cover(url, dst):
     """Скачать обложку и привести к JPEG (Pillow — уже зависимость проекта)
     для надёжного встраивания в аудио любым источником (webp/png/...).
     True при успехе, False — best-effort, не должно ронять экспорт."""
+    if not core.is_supported_url(url):
+        return False   # не http(s) — не ходим (SSRF/file://, см. SEC-11)
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "jade.tools"})
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -561,6 +563,8 @@ def api_info():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "URL не указан"}), 400
+    if not core.is_supported_url(url):
+        return jsonify({"error": "Поддерживаются только ссылки http:// или https://."}), 400
 
     # core.resolve_video_or_playlist() объединяет быструю проверку --flat-playlist
     # (без неё полный dump-single-json на ссылке-плейлисте утыкается в таймаут)

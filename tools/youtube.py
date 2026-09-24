@@ -451,6 +451,8 @@ def api_info():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "URL не указан"}), 400
+    if not core.is_supported_url(url):
+        return jsonify({"error": "Поддерживаются только ссылки http:// или https://."}), 400
     dep_err = core.missing_dependencies_payload("youtube")
     if dep_err:
         return jsonify(dep_err), 400
@@ -517,6 +519,8 @@ def api_download():
 
     if not url or not job_id:
         return jsonify({"error": "Неверный запрос (нужны url и job_id)"}), 400
+    if not core.is_supported_url(url):
+        return jsonify({"error": "Поддерживаются только ссылки http:// или https://."}), 400
     if mode not in ("video_audio", "video_only", "audio_only"):
         return jsonify({"error": "Неизвестный режим"}), 400
     if video_format not in VIDEO_FORMATS:
